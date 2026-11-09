@@ -1,12 +1,18 @@
+from datetime import date, datetime
+from pathlib import Path
+from uuid import uuid4
+
 import streamlit as st
-from supabase import create_client, Client
+from supabase import Client, create_client
 
 
 @st.cache_resource
 def obtener_cliente_supabase() -> Client:
     """
     Crea una conexión reutilizable con Supabase.
-    Las credenciales se leen desde Streamlit Secrets.
+
+    Las credenciales reales se obtienen desde Streamlit Secrets.
+    No deben escribirse directamente en este archivo.
     """
     url = st.secrets["SUPABASE_URL"]
     key = st.secrets["SUPABASE_KEY"]
@@ -38,3 +44,235 @@ def comprobar_conexion() -> dict:
         "empresas": respuesta_empresas.count or 0,
         "usuarios": respuesta_usuarios.count or 0,
     }
+
+
+def obtener_configuracion_empresa(
+    empresa_id: int,
+) -> dict | None:
+    """
+    Obtiene los parámetros configurados para una empresa activa.
+    """
+    cliente = obtener_cliente_supabase()
+
+    respuesta = (
+        cliente.table("empresas")
+        .select(
+            "id, razon_social, nombre_fantasia, "
+            "limite_rendicion, dias_maximos_documento"
+        )
+        .eq("id", empresa_id)
+        .eq("activa", True)
+        .limit(1)
+        .execute()
+    )
+
+    if not respuesta.data:
+        return None
+
+    return respuesta.data[0]
+
+
+def buscar_documento_duplicado(
+    empresa_id: int,
+    rut_emisor: str,
+    tipo_documento: str,
+    folio: str,
+) -> dict | None:
+    """
+    R1: busca una rendición con el mismo RUT, tipo y folio.
+    """
+    cliente = obtener_cliente_supabase()
+
+    respuesta = (
+        cliente.table("rendiciones")
+        .select(
+            "id, estado, proveedor, monto_total, fecha_creacion"
+        )
+        .eq("empresa_id", empresa_id)
+        .eq("rut_emisor", rut_emisor.strip())
+        .eq("tipo_documento", tipo_documento)
+        .eq("folio", folio.strip())
+        .limit(1)
+        .execute()
+    )
+
+    if not respuesta.data:
+        return None
+
+    return respuesta.data[0]
+
+
+def subir_comprobante(
+    archivo,
+    empresa_id: int,
+    usuario_id: int,
+) -> str:
+    """
+    Guarda un comprobante en el bucket privado 'comprobantes'.
+
+    Retorna la ruta interna del archivo almacenado.
+    """
+    cliente = obtener_cliente_supabase()
+
+    extension = Path(archivo.name).suffix.lower()
+
+    extensiones_permitidas = {
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".pdf",
+    }
+
+    if extension not in extensiones_permitidas:
+        raise ValueError(
+            "El tipo de archivo seleccionado no está permitido."
+        )
+
+    contenido = archivo.getvalue()
+
+    limite_bytes = 5 * 1024 * 1024
+
+    if len(contenido) > limite_bytes:
+        raise ValueError(
+            "El archivo supera el tamaño máximo permitido de 5 MB."
+        )
+
+    nombre_unico = (
+        f"{datetime.now():%Y/%m}/"
+        f"empresa_{empresa_id}/"
+        f"usuario_{usuario_id}/"
+        f"{uuid4().hex}{extension}"
+    )
+
+    opciones = {
+        "content-type": archivo.type,
+        "upsert": "false",
+    }
+
+    cliente.storage.from_("comprobantes").upload(
+        path=nombre_unico,
+        file=contenido,
+        file_options=opciones,
+    )
+
+    return nombre_unico
+
+
+def crear_rendicion(datos: dict) -> dict:
+    """
+    Inserta una rendición en Supabase y devuelve el registro creado.
+    """
+    cliente = obtener_cliente_supabase()
+
+    datos_insertar = datos.copy()
+    fecha_documento = datos_insertar.get("fecha_documento")
+
+    if isinstance(fecha_documento, date):
+        datos_insertar["fecha_documento"] = (
+            fecha_documento.isoformat()
+        )
+
+    respuesta = (
+        cliente.table("rendiciones")
+        .insert(datos_insertar)
+        .execute()
+    )
+
+    if not respuesta.data:
+        raise RuntimeError(
+            "Supabase no devolvió la rendición creada."
+        )
+
+    return respuesta.data[0]
+
+
+def registrar_auditoria(
+    empresa_id: int,
+    rendicion_id: int,
+    usuario_id: int,
+    accion: str,
+    estado_anterior: str | None,
+    estado_nuevo: str | None,
+    detalle: str,
+) -> dict:
+    """
+    Registra una acción realizada sobre una rendición.
+    """
+    cliente = obtener_cliente_supabase()
+
+    registro = {
+        "empresa_id": empresa_id,
+        "rendicion_id": rendicion_id,
+        "usuario_id": usuario_id,
+        "accion": accion,
+        "estado_anterior": estado_anterior,
+        "estado_nuevo": estado_nuevo,
+        "detalle": detalle,
+    }
+
+    respuesta = (
+        cliente.table("auditoria")
+        .insert(registro)
+        .execute()
+    )
+
+    if not respuesta.data:
+        raise RuntimeError(
+            "No fue posible registrar la auditoría."
+        )
+
+    return respuesta.data[0]
+
+
+def listar_rendiciones_usuario(
+    empresa_id: int,
+    usuario_id: int,
+) -> list:
+    """
+    Lista las rendiciones pertenecientes al trabajador autenticado.
+    """
+    cliente = obtener_cliente_supabase()
+
+    respuesta = (
+        cliente.table("rendiciones")
+        .select(
+            "id, tipo_documento, rut_emisor, proveedor, folio, "
+            "fecha_documento, categoria, descripcion, monto_neto, "
+            "iva, monto_total, archivo_url, estado, nivel_riesgo, "
+            "reglas_activadas, motivo_rechazo, fecha_creacion, "
+            "fecha_envio, fecha_revision"
+        )
+        .eq("empresa_id", empresa_id)
+        .eq("usuario_id", usuario_id)
+        .order("fecha_creacion", desc=True)
+        .execute()
+    )
+
+    return respuesta.data or []
+
+
+def obtener_rendicion_usuario(
+    rendicion_id: int,
+    empresa_id: int,
+    usuario_id: int,
+) -> dict | None:
+    """
+    Obtiene una rendición específica perteneciente al trabajador.
+    """
+    cliente = obtener_cliente_supabase()
+
+    respuesta = (
+        cliente.table("rendiciones")
+        .select("*")
+        .eq("id", rendicion_id)
+        .eq("empresa_id", empresa_id)
+        .eq("usuario_id", usuario_id)
+        .limit(1)
+        .execute()
+    )
+
+    if not respuesta.data:
+        return None
+
+    return respuesta.data[0]
