@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -108,7 +108,7 @@ def subir_comprobante(
     usuario_id: int,
 ) -> str:
     """
-    Guarda un comprobante en el bucket privado 'comprobantes'.
+    Guarda un comprobante en el bucket privado comprobantes.
 
     Retorna la ruta interna del archivo almacenado.
     """
@@ -274,5 +274,183 @@ def obtener_rendicion_usuario(
 
     if not respuesta.data:
         return None
+
+    return respuesta.data[0]
+
+
+# =========================================================
+# FUNCIONES ADMINISTRATIVAS
+# =========================================================
+
+def listar_rendiciones_pendientes(
+    empresa_id: int,
+) -> list:
+    """
+    Lista las rendiciones pendientes de una empresa.
+    """
+    cliente = obtener_cliente_supabase()
+
+    respuesta = (
+        cliente.table("rendiciones")
+        .select(
+            "id, empresa_id, usuario_id, tipo_documento, "
+            "rut_emisor, proveedor, folio, fecha_documento, "
+            "categoria, descripcion, monto_neto, iva, "
+            "monto_total, archivo_url, estado, nivel_riesgo, "
+            "reglas_activadas, fecha_envio"
+        )
+        .eq("empresa_id", empresa_id)
+        .eq("estado", "Pendiente")
+        .order("fecha_envio", desc=False)
+        .execute()
+    )
+
+    return respuesta.data or []
+
+
+def generar_url_comprobante(
+    ruta_archivo: str,
+    duracion_segundos: int = 600,
+) -> str | None:
+    """
+    Genera una URL temporal para consultar un comprobante privado.
+    """
+    if not ruta_archivo:
+        return None
+
+    cliente = obtener_cliente_supabase()
+
+    respuesta = (
+        cliente.storage
+        .from_("comprobantes")
+        .create_signed_url(
+            ruta_archivo,
+            duracion_segundos,
+        )
+    )
+
+    if not respuesta:
+        return None
+
+    if isinstance(respuesta, dict):
+        return (
+            respuesta.get("signedURL")
+            or respuesta.get("signedUrl")
+            or respuesta.get("signed_url")
+        )
+
+    # Compatibilidad con respuestas tipo objeto.
+    return (
+        getattr(respuesta, "signed_url", None)
+        or getattr(respuesta, "signedURL", None)
+    )
+
+
+def resolver_rendicion(
+    rendicion_id: int,
+    empresa_id: int,
+    administrador_id: int,
+    nuevo_estado: str,
+    motivo_rechazo: str | None = None,
+) -> dict:
+    """
+    Aprueba o rechaza una rendición pendiente.
+
+    Completa fecha_revision y revisada_por, y registra auditoría.
+    """
+    if nuevo_estado not in ["Aprobada", "Rechazada"]:
+        raise ValueError(
+            "El estado debe ser Aprobada o Rechazada."
+        )
+
+    motivo_limpio = (
+        motivo_rechazo.strip()
+        if motivo_rechazo
+        else None
+    )
+
+    if (
+        nuevo_estado == "Rechazada"
+        and not motivo_limpio
+    ):
+        raise ValueError(
+            "El motivo de rechazo es obligatorio."
+        )
+
+    cliente = obtener_cliente_supabase()
+
+    consulta_actual = (
+        cliente.table("rendiciones")
+        .select("id, estado")
+        .eq("id", rendicion_id)
+        .eq("empresa_id", empresa_id)
+        .limit(1)
+        .execute()
+    )
+
+    if not consulta_actual.data:
+        raise RuntimeError(
+            "La rendición solicitada no existe."
+        )
+
+    estado_actual = consulta_actual.data[0]["estado"]
+
+    if estado_actual != "Pendiente":
+        raise RuntimeError(
+            "La rendición ya fue revisada por otro usuario."
+        )
+
+    fecha_revision = datetime.now(
+        timezone.utc
+    ).isoformat()
+
+    cambios = {
+        "estado": nuevo_estado,
+        "motivo_rechazo": (
+            motivo_limpio
+            if nuevo_estado == "Rechazada"
+            else None
+        ),
+        "fecha_revision": fecha_revision,
+        "revisada_por": administrador_id,
+    }
+
+    respuesta = (
+        cliente.table("rendiciones")
+        .update(cambios)
+        .eq("id", rendicion_id)
+        .eq("empresa_id", empresa_id)
+        .eq("estado", "Pendiente")
+        .execute()
+    )
+
+    if not respuesta.data:
+        raise RuntimeError(
+            "No fue posible actualizar la rendición. "
+            "Es posible que ya haya sido revisada."
+        )
+
+    if nuevo_estado == "Aprobada":
+        accion = "Rendición aprobada"
+        detalle = (
+            "La rendición fue aprobada por el administrador."
+        )
+
+    else:
+        accion = "Rendición rechazada"
+        detalle = (
+            "La rendición fue rechazada. "
+            f"Motivo: {motivo_limpio}"
+        )
+
+    registrar_auditoria(
+        empresa_id=empresa_id,
+        rendicion_id=rendicion_id,
+        usuario_id=administrador_id,
+        accion=accion,
+        estado_anterior="Pendiente",
+        estado_nuevo=nuevo_estado,
+        detalle=detalle,
+    )
 
     return respuesta.data[0]
