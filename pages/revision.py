@@ -22,8 +22,8 @@ mostrar_sidebar_usuario()
 st.title("✅ Revisión administrativa")
 
 st.write(
-    "Consulta las rendiciones pendientes, revisa los datos "
-    "y registra una decisión administrativa."
+    "Consulta rendiciones pendientes o reenviadas "
+    "y registra la decisión administrativa."
 )
 
 
@@ -32,20 +32,15 @@ administrador_id = st.session_state["usuario_id"]
 
 
 def formatear_moneda(valor) -> str:
-    """
-    Convierte un valor al formato monetario chileno.
-    """
     try:
         numero = float(valor)
         return f"${numero:,.0f}".replace(",", ".")
+
     except (TypeError, ValueError):
         return "$0"
 
 
 def formatear_fecha(valor) -> str:
-    """
-    Convierte una fecha ISO de Supabase a un formato legible.
-    """
     if not valor:
         return "Sin información"
 
@@ -67,18 +62,15 @@ try:
 
 except Exception as error:
     st.error(
-        "No fue posible consultar las rendiciones pendientes."
+        "No fue posible consultar las rendiciones."
     )
+
     st.code(str(error))
     st.stop()
 
 
-# =========================================================
-# RESUMEN
-# =========================================================
-
 st.metric(
-    "Rendiciones pendientes",
+    "Rendiciones pendientes o reenviadas",
     len(rendiciones),
 )
 
@@ -92,16 +84,12 @@ if not rendiciones:
     st.stop()
 
 
-# =========================================================
-# LISTADO
-# =========================================================
-
 for rendicion in rendiciones:
     titulo = (
         f"Rendición #{rendicion['id']} · "
         f"{rendicion['proveedor']} · "
         f"{formatear_moneda(rendicion['monto_total'])} · "
-        f"Riesgo {rendicion['nivel_riesgo']}"
+        f"{rendicion['estado']}"
     )
 
     with st.expander(titulo):
@@ -114,38 +102,37 @@ for rendicion in rendiciones:
             )
 
             st.write(
-                f"**Tipo de documento:** "
-                f"{rendicion['tipo_documento']}"
+                f"**Tipo:** {rendicion['tipo_documento']}"
             )
 
             st.write(
-                f"**RUT del emisor:** "
-                f"{rendicion['rut_emisor']}"
+                f"**RUT emisor:** {rendicion['rut_emisor']}"
             )
 
             st.write(
-                f"**Proveedor:** "
-                f"{rendicion['proveedor']}"
+                f"**Proveedor:** {rendicion['proveedor']}"
             )
 
             st.write(
-                f"**Folio:** "
-                f"{rendicion['folio']}"
+                f"**Folio:** {rendicion['folio']}"
             )
 
             st.write(
-                f"**Categoría:** "
-                f"{rendicion['categoria']}"
+                f"**Categoría:** {rendicion['categoria']}"
             )
 
         with detalle_2:
             st.write(
-                f"**Fecha del documento:** "
+                f"**Estado:** {rendicion['estado']}"
+            )
+
+            st.write(
+                f"**Fecha documento:** "
                 f"{rendicion['fecha_documento']}"
             )
 
             st.write(
-                f"**Monto neto:** "
+                f"**Neto:** "
                 f"{formatear_moneda(rendicion['monto_neto'])}"
             )
 
@@ -155,47 +142,36 @@ for rendicion in rendiciones:
             )
 
             st.write(
-                f"**Monto total:** "
+                f"**Total:** "
                 f"{formatear_moneda(rendicion['monto_total'])}"
             )
 
             st.write(
-                f"**Estado:** "
-                f"{rendicion['estado']}"
-            )
-
-            st.write(
-                f"**Fecha de envío:** "
+                f"**Fecha envío:** "
                 f"{formatear_fecha(rendicion['fecha_envio'])}"
             )
 
-        descripcion = rendicion.get("descripcion")
+        if rendicion["estado"] == "Reenviada":
+            st.info(
+                "Esta rendición fue corregida por el trabajador "
+                "después de un rechazo anterior."
+            )
 
-        if descripcion:
+        if rendicion.get("descripcion"):
             st.write(
-                f"**Descripción:** {descripcion}"
+                f"**Descripción:** {rendicion['descripcion']}"
             )
 
-        # =================================================
-        # RESULTADO DE RIESGO
-        # =================================================
+        nivel = rendicion["nivel_riesgo"]
 
-        nivel_riesgo = rendicion["nivel_riesgo"]
+        if nivel == "Alto":
+            st.error(f"Nivel de riesgo: {nivel}")
 
-        if nivel_riesgo == "Alto":
-            st.error(
-                f"Nivel de riesgo: {nivel_riesgo}"
-            )
-
-        elif nivel_riesgo == "Medio":
-            st.warning(
-                f"Nivel de riesgo: {nivel_riesgo}"
-            )
+        elif nivel == "Medio":
+            st.warning(f"Nivel de riesgo: {nivel}")
 
         else:
-            st.success(
-                f"Nivel de riesgo: {nivel_riesgo}"
-            )
+            st.success(f"Nivel de riesgo: {nivel}")
 
         reglas = rendicion.get("reglas_activadas") or []
 
@@ -210,24 +186,16 @@ for rendicion in rendiciones:
                 "La rendición no presenta reglas activadas."
             )
 
-        # =================================================
-        # VALIDACIÓN DE MONTOS
-        # =================================================
-
         try:
             neto = float(rendicion["monto_neto"])
             iva = float(rendicion["iva"])
             total = float(rendicion["monto_total"])
 
-            diferencia = abs((neto + iva) - total)
-
-            if diferencia > 0:
+            if abs((neto + iva) - total) >= 1:
                 st.warning(
-                    "Los montos presentan una diferencia: "
+                    "Los montos no son consistentes. "
                     f"Neto + IVA corresponde a "
-                    f"{formatear_moneda(neto + iva)}, "
-                    f"pero el total informado es "
-                    f"{formatear_moneda(total)}."
+                    f"{formatear_moneda(neto + iva)}."
                 )
 
             else:
@@ -237,60 +205,43 @@ for rendicion in rendiciones:
 
         except (TypeError, ValueError):
             st.warning(
-                "No fue posible comprobar la consistencia "
-                "de los montos."
+                "No fue posible comprobar los montos."
             )
-
-        # =================================================
-        # COMPROBANTE
-        # =================================================
 
         ruta_archivo = rendicion.get("archivo_url")
 
         if ruta_archivo:
             try:
-                url_comprobante = generar_url_comprobante(
-                    ruta_archivo=ruta_archivo,
-                    duracion_segundos=600,
+                url = generar_url_comprobante(
+                    ruta_archivo,
+                    600,
                 )
 
-                if url_comprobante:
+                if url:
                     st.link_button(
                         "📎 Abrir comprobante",
-                        url_comprobante,
+                        url,
                         use_container_width=True,
                     )
 
                     st.caption(
-                        "El enlace del comprobante será válido "
-                        "durante 10 minutos."
-                    )
-
-                else:
-                    st.warning(
-                        "No fue posible generar el enlace "
-                        "del comprobante."
+                        "Enlace válido durante 10 minutos."
                     )
 
             except Exception:
                 st.warning(
-                    "El comprobante existe, pero no fue posible "
-                    "generar su enlace temporal."
+                    "No fue posible abrir el comprobante."
                 )
 
         else:
             st.error(
-                "La rendición no tiene un comprobante asociado."
+                "La rendición no tiene comprobante."
             )
 
         st.divider()
 
-        # =================================================
-        # DECISIÓN
-        # =================================================
-
         with st.form(
-            f"decision_rendicion_{rendicion['id']}"
+            f"decision_{rendicion['id']}"
         ):
             st.subheader("Decisión administrativa")
 
@@ -301,40 +252,35 @@ for rendicion in rendiciones:
                     "Rechazar",
                 ],
                 horizontal=True,
-                key=f"decision_{rendicion['id']}",
+                key=f"decision_radio_{rendicion['id']}",
             )
 
-            motivo_rechazo = st.text_area(
+            motivo = st.text_area(
                 "Motivo del rechazo",
-                placeholder=(
-                    "Este campo es obligatorio si seleccionas "
-                    "Rechazar."
-                ),
                 max_chars=500,
                 key=f"motivo_{rendicion['id']}",
             )
 
             confirmar = st.checkbox(
                 "Confirmo que revisé los datos y el comprobante.",
-                key=f"confirmacion_{rendicion['id']}",
+                key=f"confirmar_{rendicion['id']}",
             )
 
-            guardar_decision = st.form_submit_button(
+            guardar = st.form_submit_button(
                 "Guardar decisión",
                 type="primary",
                 use_container_width=True,
             )
 
-        if guardar_decision:
+        if guardar:
             if not confirmar:
                 st.error(
-                    "Debes confirmar que revisaste "
-                    "la rendición y el comprobante."
+                    "Debes confirmar la revisión."
                 )
 
             elif (
                 decision == "Rechazar"
-                and not motivo_rechazo.strip()
+                and not motivo.strip()
             ):
                 st.error(
                     "Debes indicar el motivo del rechazo."
@@ -348,16 +294,13 @@ for rendicion in rendiciones:
                 )
 
                 try:
-                    with st.spinner(
-                        "Guardando la decisión..."
-                    ):
-                        resolver_rendicion(
-                            rendicion_id=rendicion["id"],
-                            empresa_id=empresa_id,
-                            administrador_id=administrador_id,
-                            nuevo_estado=nuevo_estado,
-                            motivo_rechazo=motivo_rechazo,
-                        )
+                    resolver_rendicion(
+                        rendicion_id=rendicion["id"],
+                        empresa_id=empresa_id,
+                        administrador_id=administrador_id,
+                        nuevo_estado=nuevo_estado,
+                        motivo_rechazo=motivo,
+                    )
 
                     st.success(
                         f"Rendición #{rendicion['id']} "
