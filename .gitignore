@@ -1,0 +1,35 @@
+# Entorno virtual
+.venv/
+venv/
+
+# Caché de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Secretos de Streamlit
+.streamlit/secrets.toml
+
+# Variables de entorno y claves
+.env
+.env.*
+
+# Herramientas locales instaladas por Streamlit
+.agents/
+.claude/
+
+# Bases de datos locales
+*.db
+*.sqlite
+*.sqlite3
+
+# Archivos subidos durante el desarrollo
+uploads/
+
+# Configuración de editores
+.vscode/
+.idea/
+
+# Archivos del sistema operativo
+.DS_Store
+Thumbs.db
