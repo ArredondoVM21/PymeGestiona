@@ -20,6 +20,10 @@ st.set_page_config(
 )
 
 
+# =========================================================
+# SEGURIDAD Y SESIÓN
+# =========================================================
+
 exigir_rol(["trabajador"])
 mostrar_sidebar_usuario()
 
@@ -35,6 +39,10 @@ st.write(
 empresa_id = st.session_state["empresa_id"]
 usuario_id = st.session_state["usuario_id"]
 
+
+# =========================================================
+# CONFIGURACIÓN DE EMPRESA
+# =========================================================
 
 configuracion = obtener_configuracion_empresa(empresa_id)
 
@@ -201,6 +209,10 @@ with st.form(
 # =========================================================
 
 if enviar:
+    # -----------------------------------------------------
+    # CALCULAR TOTAL
+    # -----------------------------------------------------
+
     if calcular_total:
         monto_total = monto_neto + iva
 
@@ -211,6 +223,10 @@ if enviar:
 
     else:
         monto_total = monto_total_ingresado
+
+    # -----------------------------------------------------
+    # PREPARAR DATOS PARA R2-R6
+    # -----------------------------------------------------
 
     datos_evaluacion = {
         "tipo_documento": tipo_documento,
@@ -232,7 +248,7 @@ if enviar:
     )
 
     # =====================================================
-    # R1: POSIBLE DOCUMENTO DUPLICADO
+    # R1: DOCUMENTO DUPLICADO
     # =====================================================
 
     duplicado = None
@@ -257,15 +273,19 @@ if enviar:
                 "mensaje": (
                     "Existe otra rendición con el mismo RUT, "
                     "tipo de documento y folio. "
-                    f"Rendición encontrada: #{duplicado['id']}."
+                    f"Rendición encontrada: #{duplicado['id']}. "
+                    f"Estado actual: {duplicado['estado']}."
                 ),
             }
         )
 
         evaluacion["nivel_riesgo"] = "Alto"
 
+        # R1 ahora bloquea completamente un nuevo envío.
+        evaluacion["puede_enviar"] = False
+
     # =====================================================
-    # MOSTRAR RESULTADO
+    # MOSTRAR RESULTADOS
     # =====================================================
 
     st.subheader("Resultado de la evaluación")
@@ -293,7 +313,7 @@ if enviar:
         )
 
     # =====================================================
-    # VALIDACIONES BLOQUEANTES
+    # CONFIRMACIÓN DE DATOS DEMOSTRATIVOS
     # =====================================================
 
     if not aceptacion:
@@ -303,27 +323,37 @@ if enviar:
         )
         st.stop()
 
+    # =====================================================
+    # REGLAS BLOQUEANTES
+    # =====================================================
+
     if not evaluacion["puede_enviar"]:
         st.error(
             "La rendición no puede enviarse hasta corregir "
-            "las alertas obligatorias R4, R5 o R6."
+            "las alertas obligatorias R1, R4, R5 o R6."
         )
+
+        if duplicado:
+            st.info(
+                "Si necesitas modificar una rendición rechazada, "
+                "debes utilizar la futura opción "
+                "'Corregir y reenviar' desde Mis rendiciones. "
+                "No debes crear una rendición nueva con el mismo "
+                "RUT, tipo de documento y folio."
+            )
+
         st.stop()
 
-    if duplicado:
-        st.warning(
-            "La rendición será enviada con riesgo alto debido "
-            "a la posible duplicidad detectada."
-        )
-
     # =====================================================
-    # GUARDAR RENDICIÓN
+    # GUARDAR COMPROBANTE Y RENDICIÓN
     # =====================================================
 
     try:
         with st.spinner(
             "Guardando comprobante y rendición..."
         ):
+            # El comprobante solo se carga después de aprobar
+            # todas las validaciones, incluida R1.
             ruta_archivo = subir_comprobante(
                 archivo=archivo,
                 empresa_id=empresa_id,
