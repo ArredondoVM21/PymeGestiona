@@ -6,12 +6,16 @@ import streamlit as st
 from supabase import Client, create_client
 
 
+# =========================================================
+# CONEXIÓN
+# =========================================================
+
 @st.cache_resource
 def obtener_cliente_supabase() -> Client:
     """
     Crea una conexión reutilizable con Supabase.
 
-    Las credenciales reales se obtienen desde Streamlit Secrets.
+    Las credenciales se obtienen desde Streamlit Secrets.
     No deben escribirse directamente en este archivo.
     """
     url = st.secrets["SUPABASE_URL"]
@@ -46,6 +50,10 @@ def comprobar_conexion() -> dict:
     }
 
 
+# =========================================================
+# EMPRESA
+# =========================================================
+
 def obtener_configuracion_empresa(
     empresa_id: int,
 ) -> dict | None:
@@ -71,6 +79,10 @@ def obtener_configuracion_empresa(
 
     return respuesta.data[0]
 
+
+# =========================================================
+# REGLAS Y DUPLICADOS
+# =========================================================
 
 def buscar_documento_duplicado(
     empresa_id: int,
@@ -102,6 +114,10 @@ def buscar_documento_duplicado(
     return respuesta.data[0]
 
 
+# =========================================================
+# COMPROBANTES
+# =========================================================
+
 def subir_comprobante(
     archivo,
     empresa_id: int,
@@ -130,7 +146,6 @@ def subir_comprobante(
         )
 
     contenido = archivo.getvalue()
-
     limite_bytes = 5 * 1024 * 1024
 
     if len(contenido) > limite_bytes:
@@ -159,6 +174,47 @@ def subir_comprobante(
     return nombre_unico
 
 
+def generar_url_comprobante(
+    ruta_archivo: str,
+    duracion_segundos: int = 600,
+) -> str | None:
+    """
+    Genera una URL temporal para consultar un comprobante privado.
+    """
+    if not ruta_archivo:
+        return None
+
+    cliente = obtener_cliente_supabase()
+
+    respuesta = (
+        cliente.storage
+        .from_("comprobantes")
+        .create_signed_url(
+            ruta_archivo,
+            duracion_segundos,
+        )
+    )
+
+    if not respuesta:
+        return None
+
+    if isinstance(respuesta, dict):
+        return (
+            respuesta.get("signedURL")
+            or respuesta.get("signedUrl")
+            or respuesta.get("signed_url")
+        )
+
+    return (
+        getattr(respuesta, "signed_url", None)
+        or getattr(respuesta, "signedURL", None)
+    )
+
+
+# =========================================================
+# CREACIÓN DE RENDICIONES
+# =========================================================
+
 def crear_rendicion(datos: dict) -> dict:
     """
     Inserta una rendición en Supabase y devuelve el registro creado.
@@ -186,6 +242,10 @@ def crear_rendicion(datos: dict) -> dict:
 
     return respuesta.data[0]
 
+
+# =========================================================
+# AUDITORÍA
+# =========================================================
 
 def registrar_auditoria(
     empresa_id: int,
@@ -224,6 +284,97 @@ def registrar_auditoria(
 
     return respuesta.data[0]
 
+
+def listar_auditoria_empresa(
+    empresa_id: int,
+) -> list:
+    """
+    Lista el historial de auditoría de una empresa.
+
+    Complementa cada evento con los datos básicos del usuario
+    responsable y de la rendición asociada.
+    """
+    cliente = obtener_cliente_supabase()
+
+    respuesta_auditoria = (
+        cliente.table("auditoria")
+        .select(
+            "id, empresa_id, rendicion_id, usuario_id, accion, "
+            "estado_anterior, estado_nuevo, detalle, fecha_accion"
+        )
+        .eq("empresa_id", empresa_id)
+        .order("fecha_accion", desc=True)
+        .execute()
+    )
+
+    eventos = respuesta_auditoria.data or []
+
+    if not eventos:
+        return []
+
+    usuarios_ids = list(
+        {
+            evento["usuario_id"]
+            for evento in eventos
+            if evento.get("usuario_id") is not None
+        }
+    )
+
+    rendiciones_ids = list(
+        {
+            evento["rendicion_id"]
+            for evento in eventos
+            if evento.get("rendicion_id") is not None
+        }
+    )
+
+    usuarios_por_id = {}
+    rendiciones_por_id = {}
+
+    if usuarios_ids:
+        respuesta_usuarios = (
+            cliente.table("usuarios")
+            .select("id, nombre, correo, rol")
+            .in_("id", usuarios_ids)
+            .execute()
+        )
+
+        usuarios_por_id = {
+            usuario["id"]: usuario
+            for usuario in respuesta_usuarios.data or []
+        }
+
+    if rendiciones_ids:
+        respuesta_rendiciones = (
+            cliente.table("rendiciones")
+            .select(
+                "id, proveedor, folio, tipo_documento, "
+                "monto_total, estado, nivel_riesgo"
+            )
+            .in_("id", rendiciones_ids)
+            .execute()
+        )
+
+        rendiciones_por_id = {
+            rendicion["id"]: rendicion
+            for rendicion in respuesta_rendiciones.data or []
+        }
+
+    for evento in eventos:
+        evento["usuario"] = usuarios_por_id.get(
+            evento.get("usuario_id")
+        )
+
+        evento["rendicion"] = rendiciones_por_id.get(
+            evento.get("rendicion_id")
+        )
+
+    return eventos
+
+
+# =========================================================
+# CONSULTAS DEL TRABAJADOR
+# =========================================================
 
 def listar_rendiciones_usuario(
     empresa_id: int,
@@ -279,7 +430,7 @@ def obtener_rendicion_usuario(
 
 
 # =========================================================
-# FUNCIONES ADMINISTRATIVAS
+# CONSULTAS ADMINISTRATIVAS
 # =========================================================
 
 def listar_rendiciones_pendientes(
@@ -308,44 +459,6 @@ def listar_rendiciones_pendientes(
     return respuesta.data or []
 
 
-def generar_url_comprobante(
-    ruta_archivo: str,
-    duracion_segundos: int = 600,
-) -> str | None:
-    """
-    Genera una URL temporal para consultar un comprobante privado.
-    """
-    if not ruta_archivo:
-        return None
-
-    cliente = obtener_cliente_supabase()
-
-    respuesta = (
-        cliente.storage
-        .from_("comprobantes")
-        .create_signed_url(
-            ruta_archivo,
-            duracion_segundos,
-        )
-    )
-
-    if not respuesta:
-        return None
-
-    if isinstance(respuesta, dict):
-        return (
-            respuesta.get("signedURL")
-            or respuesta.get("signedUrl")
-            or respuesta.get("signed_url")
-        )
-
-    # Compatibilidad con respuestas tipo objeto.
-    return (
-        getattr(respuesta, "signed_url", None)
-        or getattr(respuesta, "signedURL", None)
-    )
-
-
 def resolver_rendicion(
     rendicion_id: int,
     empresa_id: int,
@@ -356,7 +469,8 @@ def resolver_rendicion(
     """
     Aprueba o rechaza una rendición pendiente.
 
-    Completa fecha_revision y revisada_por, y registra auditoría.
+    Completa la fecha de revisión, el usuario revisor
+    y registra la acción en auditoría.
     """
     if nuevo_estado not in ["Aprobada", "Rechazada"]:
         raise ValueError(
