@@ -20,14 +20,15 @@ st.set_page_config(
 )
 
 
-# Solo trabajadores autenticados pueden acceder.
 exigir_rol(["trabajador"])
 mostrar_sidebar_usuario()
 
 
 st.title("🧾 Nueva rendición")
+
 st.write(
-    "Registra los datos del documento y adjunta el comprobante."
+    "Registra los datos del documento y adjunta "
+    "el comprobante correspondiente."
 )
 
 
@@ -35,7 +36,6 @@ empresa_id = st.session_state["empresa_id"]
 usuario_id = st.session_state["usuario_id"]
 
 
-# Obtener parámetros de la empresa desde Supabase.
 configuracion = obtener_configuracion_empresa(empresa_id)
 
 if configuracion is None:
@@ -76,7 +76,7 @@ with st.expander("Parámetros aplicados"):
 
 
 # =========================================================
-# FORMULARIO DE RENDICIÓN
+# FORMULARIO
 # =========================================================
 
 with st.form(
@@ -140,9 +140,11 @@ with st.form(
 
     st.subheader("Montos")
 
-    monto_1, monto_2, monto_3 = st.columns(3)
+    columna_monto_1, columna_monto_2, columna_monto_3 = (
+        st.columns(3)
+    )
 
-    with monto_1:
+    with columna_monto_1:
         monto_neto = st.number_input(
             "Monto neto",
             min_value=0,
@@ -150,7 +152,7 @@ with st.form(
             format="%d",
         )
 
-    with monto_2:
+    with columna_monto_2:
         iva = st.number_input(
             "IVA",
             min_value=0,
@@ -158,8 +160,8 @@ with st.form(
             format="%d",
         )
 
-    with monto_3:
-        monto_total = st.number_input(
+    with columna_monto_3:
+        monto_total_ingresado = st.number_input(
             "Monto total *",
             min_value=0,
             step=100,
@@ -172,7 +174,13 @@ with st.form(
 
     archivo = st.file_uploader(
         "Documento de respaldo *",
-        type=["jpg", "jpeg", "png", "webp", "pdf"],
+        type=[
+            "jpg",
+            "jpeg",
+            "png",
+            "webp",
+            "pdf",
+        ],
         help="Tamaño máximo permitido: 5 MB.",
     )
 
@@ -193,9 +201,16 @@ with st.form(
 # =========================================================
 
 if enviar:
-    # Calcula el total cuando el usuario marca la opción.
     if calcular_total:
         monto_total = monto_neto + iva
+
+        st.info(
+            f"Total calculado automáticamente: "
+            f"${float(monto_total):,.0f}"
+        )
+
+    else:
+        monto_total = monto_total_ingresado
 
     datos_evaluacion = {
         "tipo_documento": tipo_documento,
@@ -204,10 +219,11 @@ if enviar:
         "folio": folio.strip(),
         "fecha_documento": fecha_documento,
         "categoria": categoria,
+        "monto_neto": float(monto_neto),
+        "iva": float(iva),
         "monto_total": float(monto_total),
     }
 
-    # Ejecutar reglas locales R2, R3, R4 y R5.
     evaluacion = evaluar_reglas_locales(
         datos=datos_evaluacion,
         limite=limite_rendicion,
@@ -215,7 +231,10 @@ if enviar:
         archivo_cargado=archivo is not None,
     )
 
-    # Ejecutar R1 consultando documentos existentes en Supabase.
+    # =====================================================
+    # R1: POSIBLE DOCUMENTO DUPLICADO
+    # =====================================================
+
     duplicado = None
 
     if (
@@ -245,7 +264,10 @@ if enviar:
 
         evaluacion["nivel_riesgo"] = "Alto"
 
-    # Mostrar resultados.
+    # =====================================================
+    # MOSTRAR RESULTADO
+    # =====================================================
+
     st.subheader("Resultado de la evaluación")
 
     if evaluacion["alertas"]:
@@ -258,15 +280,22 @@ if enviar:
 
             if alerta["nivel"] == "Alto":
                 st.error(mensaje)
-            else:
+
+            elif alerta["nivel"] == "Medio":
                 st.warning(mensaje)
+
+            else:
+                st.info(mensaje)
 
     else:
         st.success(
             "No se detectaron alertas en la evaluación."
         )
 
-    # Validación de datos demostrativos.
+    # =====================================================
+    # VALIDACIONES BLOQUEANTES
+    # =====================================================
+
     if not aceptacion:
         st.error(
             "Debes confirmar que estás utilizando "
@@ -274,27 +303,27 @@ if enviar:
         )
         st.stop()
 
-    # R4 o R5 impiden el envío.
     if not evaluacion["puede_enviar"]:
         st.error(
             "La rendición no puede enviarse hasta corregir "
-            "las alertas obligatorias R4 o R5."
+            "las alertas obligatorias R4, R5 o R6."
         )
         st.stop()
 
-    # Si existe duplicado, se advierte pero se permite registrar
-    # para que el administrador pueda revisarlo.
     if duplicado:
         st.warning(
             "La rendición será enviada con riesgo alto debido "
             "a la posible duplicidad detectada."
         )
 
+    # =====================================================
+    # GUARDAR RENDICIÓN
+    # =====================================================
+
     try:
         with st.spinner(
             "Guardando comprobante y rendición..."
         ):
-            # Cargar archivo en Supabase Storage.
             ruta_archivo = subir_comprobante(
                 archivo=archivo,
                 empresa_id=empresa_id,
@@ -306,9 +335,6 @@ if enviar:
                 for alerta in evaluacion["alertas"]
             ]
 
-            # Crear rendición.
-            # fecha_envio NO se envía desde Python.
-            # Supabase la completa automáticamente con now().
             nueva_rendicion = crear_rendicion(
                 {
                     "empresa_id": empresa_id,
@@ -332,7 +358,6 @@ if enviar:
                 }
             )
 
-            # Registrar auditoría.
             registrar_auditoria(
                 empresa_id=empresa_id,
                 rendicion_id=nueva_rendicion["id"],
