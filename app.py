@@ -1,5 +1,5 @@
 import streamlit as st
-
+from database import comprobar_conexion
 
 # Configuración general de la aplicación
 st.set_page_config(
@@ -16,7 +16,20 @@ st.title("📊 PymeGestiona")
 st.subheader("Sistema de gestión y control de rendiciones")
 
 st.success("Prototipo funcional desplegado correctamente")
+try:
+    estado_db = comprobar_conexion()
 
+    st.success("Conexión con Supabase establecida correctamente.")
+
+    st.caption(
+        f"Base de datos disponible: "
+        f"{estado_db['empresas']} empresa y "
+        f"{estado_db['usuarios']} usuarios."
+    )
+
+except Exception as error:
+    st.error("No fue posible conectar con Supabase.")
+    st.code(str(error))
 
 # Descripción del prototipo
 st.markdown(
