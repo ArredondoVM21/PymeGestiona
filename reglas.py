@@ -1,9 +1,94 @@
+import re
 from datetime import date
+
+
+# =========================================================
+# NORMALIZACIÓN Y VALIDACIÓN DE RUT Y FOLIO
+# =========================================================
+
+def normalizar_rut(rut: str | None) -> str:
+    """
+    Deja el RUT en formato canónico: sin puntos ni espacios,
+    con guion antes del dígito verificador y K en mayúscula.
+
+    Ejemplos: "76.123.456-0" y "761234560" -> "76123456-0".
+    """
+    if not rut:
+        return ""
+
+    limpio = re.sub(r"[^0-9kK]", "", str(rut)).upper()
+
+    if len(limpio) < 2:
+        return limpio
+
+    cuerpo = limpio[:-1].lstrip("0")
+    digito = limpio[-1]
+
+    return f"{cuerpo}-{digito}"
+
+
+def calcular_digito_verificador(cuerpo: str) -> str:
+    """
+    Calcula el dígito verificador de un RUT chileno (módulo 11).
+    """
+    suma = 0
+    multiplicador = 2
+
+    for digito in reversed(cuerpo):
+        suma += int(digito) * multiplicador
+        multiplicador = multiplicador + 1 if multiplicador < 7 else 2
+
+    resto = 11 - (suma % 11)
+
+    if resto == 11:
+        return "0"
+
+    if resto == 10:
+        return "K"
+
+    return str(resto)
+
+
+def validar_rut(rut: str | None) -> bool:
+    """
+    Comprueba formato y dígito verificador de un RUT chileno.
+    """
+    normalizado = normalizar_rut(rut)
+
+    if "-" not in normalizado:
+        return False
+
+    cuerpo, digito = normalizado.split("-")
+
+    if not cuerpo.isdigit() or not 6 <= len(cuerpo) <= 8:
+        return False
+
+    return calcular_digito_verificador(cuerpo) == digito
+
+
+def normalizar_folio(folio: str | None) -> str:
+    """
+    Quita espacios y ceros a la izquierda del folio.
+
+    Ejemplo: " 000123 " -> "123". Un folio formado solo
+    por ceros se conserva como "0".
+    """
+    if not folio:
+        return ""
+
+    limpio = re.sub(r"\s+", "", str(folio)).upper()
+
+    if limpio.isdigit():
+        return limpio.lstrip("0") or "0"
+
+    return limpio
 
 
 def validar_campos_obligatorios(datos: dict) -> list[str]:
     """
     R5: identifica campos obligatorios vacíos o inválidos.
+
+    Incluye la validación del RUT del emisor (módulo 11).
     """
     campos_texto = {
         "tipo_documento": "Tipo de documento",
@@ -24,6 +109,17 @@ def validar_campos_obligatorios(datos: dict) -> list[str]:
 
         elif isinstance(valor, str) and not valor.strip():
             faltantes.append(nombre_visible)
+
+    rut = datos.get("rut_emisor")
+
+    if (
+        isinstance(rut, str)
+        and rut.strip()
+        and not validar_rut(rut)
+    ):
+        faltantes.append(
+            "RUT del emisor (dígito verificador inválido)"
+        )
 
     monto_total = datos.get("monto_total")
 

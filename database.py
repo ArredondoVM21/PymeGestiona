@@ -5,6 +5,8 @@ from uuid import uuid4
 import streamlit as st
 from supabase import Client, create_client
 
+from reglas import normalizar_folio, normalizar_rut
+
 
 # =========================================================
 # CONEXIÓN
@@ -45,6 +47,46 @@ def comprobar_conexion() -> dict:
         "empresas": respuesta_empresas.count or 0,
         "usuarios": respuesta_usuarios.count or 0,
     }
+
+
+# =========================================================
+# UTILIDADES
+# =========================================================
+
+def normalizar_documento(datos: dict) -> dict:
+    """
+    Normaliza RUT y folio antes de guardar, para que R1
+    compare siempre el mismo formato.
+    """
+    normalizados = datos.copy()
+
+    if "rut_emisor" in normalizados:
+        normalizados["rut_emisor"] = normalizar_rut(
+            normalizados["rut_emisor"]
+        )
+
+    if "folio" in normalizados:
+        normalizados["folio"] = normalizar_folio(
+            normalizados["folio"]
+        )
+
+    return normalizados
+
+
+def es_violacion_unicidad(error: Exception) -> bool:
+    """
+    Detecta el error 23505 de PostgreSQL (clave única duplicada).
+    """
+    return (
+        getattr(error, "code", None) == "23505"
+        or "23505" in str(error)
+    )
+
+
+MENSAJE_DUPLICADO = (
+    "R1: ya existe una rendición con el mismo RUT, "
+    "tipo de documento y folio."
+)
 
 
 # =========================================================
@@ -98,9 +140,9 @@ def buscar_documento_duplicado(
             "id, estado, proveedor, monto_total, fecha_creacion"
         )
         .eq("empresa_id", empresa_id)
-        .eq("rut_emisor", rut_emisor.strip())
+        .eq("rut_emisor", normalizar_rut(rut_emisor))
         .eq("tipo_documento", tipo_documento)
-        .eq("folio", folio.strip())
+        .eq("folio", normalizar_folio(folio))
         .limit(1)
         .execute()
     )
@@ -129,9 +171,9 @@ def buscar_documento_duplicado_excluyendo(
             "id, estado, proveedor, monto_total, fecha_creacion"
         )
         .eq("empresa_id", empresa_id)
-        .eq("rut_emisor", rut_emisor.strip())
+        .eq("rut_emisor", normalizar_rut(rut_emisor))
         .eq("tipo_documento", tipo_documento)
-        .eq("folio", folio.strip())
+        .eq("folio", normalizar_folio(folio))
         .neq("id", rendicion_excluida_id)
         .limit(1)
         .execute()
@@ -199,6 +241,25 @@ def subir_comprobante(
     return nombre_unico
 
 
+def eliminar_comprobante(ruta_archivo: str | None) -> None:
+    """
+    Elimina un comprobante que quedó sin rendición asociada
+    (por ejemplo, si falló el guardado posterior).
+    No interrumpe el flujo si la eliminación falla.
+    """
+    if not ruta_archivo:
+        return
+
+    try:
+        cliente = obtener_cliente_supabase()
+        cliente.storage.from_("comprobantes").remove(
+            [ruta_archivo]
+        )
+
+    except Exception:
+        pass
+
+
 def generar_url_comprobante(
     ruta_archivo: str,
     duracion_segundos: int = 600,
@@ -246,7 +307,7 @@ def crear_rendicion(datos: dict) -> dict:
     """
     cliente = obtener_cliente_supabase()
 
-    datos_insertar = datos.copy()
+    datos_insertar = normalizar_documento(datos)
     fecha_documento = datos_insertar.get("fecha_documento")
 
     if isinstance(fecha_documento, date):
@@ -254,11 +315,20 @@ def crear_rendicion(datos: dict) -> dict:
             fecha_documento.isoformat()
         )
 
-    respuesta = (
-        cliente.table("rendiciones")
-        .insert(datos_insertar)
-        .execute()
-    )
+    try:
+        respuesta = (
+            cliente.table("rendiciones")
+            .insert(datos_insertar)
+            .execute()
+        )
+
+    except Exception as error:
+        # El índice único de la base de datos respalda R1
+        # ante dos envíos simultáneos del mismo documento.
+        if es_violacion_unicidad(error):
+            raise RuntimeError(MENSAJE_DUPLICADO) from error
+
+        raise
 
     if not respuesta.data:
         raise RuntimeError(
@@ -513,7 +583,7 @@ def actualizar_y_reenviar_rendicion(
             "Solo se pueden corregir rendiciones rechazadas."
         )
 
-    cambios = datos_actualizados.copy()
+    cambios = normalizar_documento(datos_actualizados)
 
     fecha_documento = cambios.get("fecha_documento")
 
@@ -532,15 +602,22 @@ def actualizar_y_reenviar_rendicion(
         }
     )
 
-    respuesta = (
-        cliente.table("rendiciones")
-        .update(cambios)
-        .eq("id", rendicion_id)
-        .eq("empresa_id", empresa_id)
-        .eq("usuario_id", usuario_id)
-        .eq("estado", "Rechazada")
-        .execute()
-    )
+    try:
+        respuesta = (
+            cliente.table("rendiciones")
+            .update(cambios)
+            .eq("id", rendicion_id)
+            .eq("empresa_id", empresa_id)
+            .eq("usuario_id", usuario_id)
+            .eq("estado", "Rechazada")
+            .execute()
+        )
+
+    except Exception as error:
+        if es_violacion_unicidad(error):
+            raise RuntimeError(MENSAJE_DUPLICADO) from error
+
+        raise
 
     if not respuesta.data:
         raise RuntimeError(
@@ -587,6 +664,50 @@ def listar_rendiciones_pendientes(
         .eq("empresa_id", empresa_id)
         .in_("estado", ["Pendiente", "Reenviada"])
         .order("fecha_envio", desc=False)
+        .execute()
+    )
+
+    rendiciones = respuesta.data or []
+
+    # Agrega el nombre del trabajador para no mostrar solo su ID.
+    usuarios_ids = list(
+        {rendicion["usuario_id"] for rendicion in rendiciones}
+    )
+
+    if usuarios_ids:
+        respuesta_usuarios = (
+            cliente.table("usuarios")
+            .select("id, nombre, correo")
+            .in_("id", usuarios_ids)
+            .execute()
+        )
+
+        usuarios_por_id = {
+            usuario["id"]: usuario
+            for usuario in respuesta_usuarios.data or []
+        }
+
+        for rendicion in rendiciones:
+            rendicion["trabajador"] = usuarios_por_id.get(
+                rendicion["usuario_id"]
+            )
+
+    return rendiciones
+
+
+def resumen_rendiciones_empresa(
+    empresa_id: int,
+) -> list:
+    """
+    Devuelve estado, riesgo y monto de todas las rendiciones
+    de la empresa, para los indicadores del panel administrativo.
+    """
+    cliente = obtener_cliente_supabase()
+
+    respuesta = (
+        cliente.table("rendiciones")
+        .select("id, estado, nivel_riesgo, monto_total")
+        .eq("empresa_id", empresa_id)
         .execute()
     )
 
@@ -658,17 +779,21 @@ def resolver_rendicion(
         "revisada_por": administrador_id,
     }
 
+    # Se repite la condición de estado en el UPDATE para que,
+    # si dos administradores resuelven a la vez, solo uno gane.
     respuesta = (
         cliente.table("rendiciones")
         .update(cambios)
         .eq("id", rendicion_id)
         .eq("empresa_id", empresa_id)
+        .in_("estado", ["Pendiente", "Reenviada"])
         .execute()
     )
 
     if not respuesta.data:
         raise RuntimeError(
-            "No fue posible actualizar la rendición."
+            "La rendición ya fue revisada por otro "
+            "administrador o no está disponible."
         )
 
     if nuevo_estado == "Aprobada":

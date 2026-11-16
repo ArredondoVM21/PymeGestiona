@@ -33,3 +33,5 @@ uploads/
 # Archivos del sistema operativo
 .DS_Store
 Thumbs.db
+# Caché de pruebas
+.pytest_cache/

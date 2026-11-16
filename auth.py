@@ -130,16 +130,26 @@ def exigir_rol(roles_permitidos: list[str]) -> None:
 
 def mostrar_sidebar_usuario() -> None:
     """
-    Muestra información básica de la sesión y el cierre de sesión.
+    Muestra la tarjeta del usuario y el cierre de sesión.
     """
     if usuario_autenticado():
         with st.sidebar:
             st.divider()
-            st.write(f"**Usuario:** {st.session_state['nombre']}")
-            st.write(f"**Rol:** {st.session_state['rol'].capitalize()}")
+
+            iconos_rol = {"trabajador": "👷", "administrador": "🛡️"}
+            rol = st.session_state["rol"]
+
+            with st.container(border=True):
+                st.markdown(
+                    f"{iconos_rol.get(rol, '👤')} **{st.session_state['nombre']}**"
+                )
+                st.caption(
+                    f"{rol.capitalize()} · {st.session_state['correo']}"
+                )
 
             if st.button(
                 "Cerrar sesión",
+                icon="🚪",
                 type="secondary",
                 use_container_width=True,
             ):

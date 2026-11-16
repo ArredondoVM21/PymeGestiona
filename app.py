@@ -1,3 +1,5 @@
+import time
+
 import streamlit as st
 
 from auth import (
@@ -5,10 +7,25 @@ from auth import (
     cerrar_sesion,
     iniciar_sesion,
     inicializar_sesion,
+    mostrar_sidebar_usuario,
     usuario_autenticado,
 )
-from database import comprobar_conexion
+from database import (
+    listar_rendiciones_usuario,
+    resumen_rendiciones_empresa,
+)
+from ui import (
+    aplicar_estilos,
+    encabezado,
+    formatear_moneda,
+    kpis,
+    pie_pagina,
+)
 
+
+# =========================================================
+# CONFIGURACIÓN GLOBAL
+# =========================================================
 
 st.set_page_config(
     page_title="PymeGestiona",
@@ -17,196 +34,310 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-
+# Con st.navigation, app.py se ejecuta en cada página,
+# por lo que los estilos quedan aplicados en todo el sistema.
+aplicar_estilos()
 inicializar_sesion()
 
 
+# =========================================================
+# CONTROL DE INTENTOS DE INICIO DE SESIÓN
+# =========================================================
+
+MAX_INTENTOS_LOGIN = 5
+SEGUNDOS_BLOQUEO_LOGIN = 300
+
+
+def segundos_bloqueo_restantes() -> int:
+    """
+    Devuelve los segundos que faltan para desbloquear el login.
+    """
+    bloqueado_hasta = st.session_state.get("login_bloqueado_hasta", 0)
+    return max(0, int(bloqueado_hasta - time.time()))
+
+
+def registrar_intento_fallido() -> None:
+    """
+    Cuenta intentos fallidos y bloquea el formulario
+    temporalmente al llegar al máximo.
+    """
+    intentos = st.session_state.get("login_intentos", 0) + 1
+    st.session_state["login_intentos"] = intentos
+
+    if intentos >= MAX_INTENTOS_LOGIN:
+        st.session_state["login_bloqueado_hasta"] = (
+            time.time() + SEGUNDOS_BLOQUEO_LOGIN
+        )
+        st.session_state["login_intentos"] = 0
+
+
+# =========================================================
+# INICIO DE SESIÓN
+# =========================================================
+
 def mostrar_login() -> None:
-    st.title("📊 PymeGestiona")
-    st.subheader("Sistema de gestión y control de rendiciones")
+    """
+    Formulario de acceso centrado, sin navegación interna.
+    """
+    _, centro, _ = st.columns([1, 1.3, 1])
 
-    st.success("Prototipo funcional desplegado en la nube")
+    with centro:
+        st.markdown("<div style='height:3rem'></div>", unsafe_allow_html=True)
 
-    with st.form("formulario_login"):
-        st.subheader("🔐 Inicio de sesión")
-
-        correo = st.text_input(
-            "Correo electrónico",
-            placeholder="usuario@pymegestiona.cl",
+        encabezado(
+            "📊",
+            "PymeGestiona",
+            "Gestión y control de rendiciones de gastos para PYMEs.",
         )
 
-        password = st.text_input(
-            "Contraseña",
-            type="password",
-            placeholder="Ingresa tu contraseña",
-        )
+        with st.container(border=True):
+            with st.form("formulario_login"):
+                st.markdown("#### 🔐 Iniciar sesión")
 
-        ingresar = st.form_submit_button(
-            "Ingresar",
-            type="primary",
-            use_container_width=True,
-        )
+                correo = st.text_input(
+                    "Correo electrónico",
+                    placeholder="usuario@pymegestiona.cl",
+                )
 
-    if ingresar:
-        if not correo.strip() or not password:
-            st.warning("Debes ingresar el correo y la contraseña.")
-            return
+                password = st.text_input(
+                    "Contraseña",
+                    type="password",
+                    placeholder="Ingresa tu contraseña",
+                )
 
-        try:
-            usuario = autenticar_usuario(correo, password)
+                ingresar = st.form_submit_button(
+                    "Ingresar",
+                    type="primary",
+                    use_container_width=True,
+                )
 
-            if usuario is None:
-                st.error("Correo o contraseña incorrectos.")
-                return
+            restantes = segundos_bloqueo_restantes()
 
-            iniciar_sesion(usuario)
-            st.rerun()
+            if ingresar and restantes > 0:
+                st.error(
+                    "Demasiados intentos fallidos. Espera "
+                    f"{restantes // 60 + 1} minuto(s) antes de "
+                    "volver a intentarlo."
+                )
 
-        except Exception:
-            st.error(
-                "No fue posible validar el inicio de sesión. "
-                "Inténtalo nuevamente."
+            elif ingresar:
+                if not correo.strip() or not password:
+                    st.warning("Debes ingresar el correo y la contraseña.")
+
+                else:
+                    try:
+                        usuario = autenticar_usuario(correo, password)
+
+                        if usuario is None:
+                            registrar_intento_fallido()
+                            st.error("Correo o contraseña incorrectos.")
+
+                        else:
+                            st.session_state["login_intentos"] = 0
+                            iniciar_sesion(usuario)
+                            st.rerun()
+
+                    except Exception:
+                        st.error(
+                            "No fue posible validar el inicio de sesión. "
+                            "Inténtalo nuevamente."
+                        )
+
+        with st.expander("Credenciales demostrativas"):
+            st.markdown(
+                """
+                | Perfil | Correo | Contraseña |
+                |---|---|---|
+                | Trabajador | `trabajador@pymegestiona.cl` | `Demo1234!` |
+                | Administrador | `admin@pymegestiona.cl` | `Admin1234!` |
+
+                Estas cuentas contienen exclusivamente datos demostrativos.
+                """
             )
 
-    with st.expander("Credenciales demostrativas"):
-        st.markdown(
-            """
-            **Trabajador**
+        st.caption("Prototipo académico desplegado en la nube · INACAP")
 
-            - Correo: `trabajador@pymegestiona.cl`
-            - Contraseña: `Demo1234!`
 
-            **Administrador**
+# =========================================================
+# PANEL PRINCIPAL
+# =========================================================
 
-            - Correo: `admin@pymegestiona.cl`
-            - Contraseña: `Admin1234!`
-
-            Estas cuentas contienen exclusivamente datos demostrativos.
-            """
-        )
+def tarjeta_acceso(titulo: str, descripcion: str, pagina: str, icono: str) -> None:
+    with st.container(border=True):
+        st.markdown(f"#### {icono} {titulo}")
+        st.caption(descripcion)
+        st.page_link(pagina, label="Abrir", icon="➡️", use_container_width=True)
 
 
 def mostrar_inicio() -> None:
-    with st.sidebar:
-        st.header("Sesión activa")
-        st.write(f"**Usuario:** {st.session_state['nombre']}")
-        st.write(
-            f"**Rol:** {st.session_state['rol'].capitalize()}"
-        )
+    """
+    Panel principal según el rol activo.
+    """
+    mostrar_sidebar_usuario()
 
-        if st.button(
-            "Cerrar sesión",
-            type="secondary",
-            use_container_width=True,
-        ):
-            cerrar_sesion()
+    nombre = st.session_state["nombre"]
+    rol = st.session_state["rol"]
 
-    st.title("📊 PymeGestiona")
-
-    st.success(
-        f"Bienvenido/a, {st.session_state['nombre']}."
+    encabezado(
+        "👋",
+        f"Hola, {nombre.split()[0] if nombre else 'usuario'}",
+        "Panel del trabajador" if rol == "trabajador" else "Panel administrativo",
     )
 
-    try:
-        estado_db = comprobar_conexion()
+    if rol == "trabajador":
+        mostrar_panel_trabajador()
 
-        st.caption(
-            f"Supabase conectado: "
-            f"{estado_db['empresas']} empresa y "
-            f"{estado_db['usuarios']} usuarios."
+    elif rol == "administrador":
+        mostrar_panel_administrador()
+
+    pie_pagina()
+
+
+def mostrar_panel_trabajador() -> None:
+    try:
+        rendiciones = listar_rendiciones_usuario(
+            empresa_id=st.session_state["empresa_id"],
+            usuario_id=st.session_state["usuario_id"],
         )
+
+        estados = [rendicion["estado"] for rendicion in rendiciones]
+
+        kpis(
+            [
+                ("Rendiciones", len(rendiciones)),
+                ("En revisión", estados.count("Pendiente") + estados.count("Reenviada")),
+                ("Aprobadas", estados.count("Aprobada")),
+                ("Por corregir", estados.count("Rechazada")),
+            ]
+        )
+
+        if estados.count("Rechazada"):
+            st.warning(
+                f"Tienes {estados.count('Rechazada')} rendición(es) "
+                "rechazada(s) para corregir en **Mis rendiciones**.",
+                icon="✏️",
+            )
 
     except Exception:
-        st.warning(
-            "La sesión está activa, pero no fue posible comprobar "
-            "el estado general de la base de datos."
+        st.warning("No fue posible cargar el resumen de tus rendiciones.")
+
+    st.write("")
+    columna_1, columna_2 = st.columns(2)
+
+    with columna_1:
+        tarjeta_acceso(
+            "Nueva rendición",
+            "Registra una boleta, factura o comprobante y envíalo a revisión.",
+            "pages/nueva_rendicion.py",
+            "🧾",
         )
 
-    st.divider()
+    with columna_2:
+        tarjeta_acceso(
+            "Mis rendiciones",
+            "Consulta estados, observaciones y correcciones pendientes.",
+            "pages/mis_rendiciones.py",
+            "📋",
+        )
 
-    if st.session_state["rol"] == "trabajador":
-        st.subheader("Panel del trabajador")
 
-        columna_1, columna_2 = st.columns(2)
+def mostrar_panel_administrador() -> None:
+    try:
+        rendiciones = resumen_rendiciones_empresa(
+            empresa_id=st.session_state["empresa_id"],
+        )
 
-        with columna_1:
+        por_revisar = [
+            r for r in rendiciones if r["estado"] in ["Pendiente", "Reenviada"]
+        ]
+        alto_riesgo = [r for r in por_revisar if r["nivel_riesgo"] == "Alto"]
+        monto_aprobado = sum(
+            float(r["monto_total"] or 0)
+            for r in rendiciones
+            if r["estado"] == "Aprobada"
+        )
+
+        kpis(
+            [
+                ("Por revisar", len(por_revisar)),
+                ("Riesgo alto por revisar", len(alto_riesgo)),
+                ("Total rendiciones", len(rendiciones)),
+                ("Monto aprobado", formatear_moneda(monto_aprobado)),
+            ]
+        )
+
+        if por_revisar:
             st.info(
-                """
-                **Nueva rendición**
-
-                Registra una boleta, factura o comprobante para
-                enviarlo a revisión.
-                """
+                f"Hay {len(por_revisar)} rendición(es) esperando tu decisión.",
+                icon="📥",
             )
 
-            st.page_link(
-                "pages/nueva_rendicion.py",
-                label="Crear nueva rendición",
-                icon="🧾",
-            )
+    except Exception:
+        st.warning("No fue posible cargar el resumen de la empresa.")
 
-        with columna_2:
-            st.info(
-                """
-                **Mis rendiciones**
+    st.write("")
+    columna_1, columna_2 = st.columns(2)
 
-                Consulta el estado, observaciones y alertas de tus
-                rendiciones.
-                """
-            )
+    with columna_1:
+        tarjeta_acceso(
+            "Revisión administrativa",
+            "Revisa rendiciones pendientes o reenviadas y registra una decisión.",
+            "pages/revision.py",
+            "✅",
+        )
 
-            st.page_link(
-                "pages/mis_rendiciones.py",
-                label="Consultar mis rendiciones",
-                icon="📋",
-            )
-
-    elif st.session_state["rol"] == "administrador":
-        st.subheader("Panel administrativo")
-
-        columna_1, columna_2 = st.columns(2)
-
-        with columna_1:
-            st.info(
-                """
-                **Revisión administrativa**
-
-                Consulta rendiciones pendientes y registra una
-                decisión.
-                """
-            )
-
-            st.page_link(
-                "pages/revision.py",
-                label="Revisar rendiciones",
-                icon="✅",
-            )
-
-        with columna_2:
-            st.info(
-                """
-                **Trazabilidad**
-
-                Consulta los cambios de estado y las acciones
-                registradas.
-                """
-            )
-
-            st.page_link(
-                "pages/trazabilidad.py",
-                label="Consultar trazabilidad",
-                icon="🔎",
-            )
-
-    st.divider()
-
-    st.caption(
-        "PymeGestiona · Prototipo académico · "
-        "Datos exclusivamente demostrativos"
-    )
+    with columna_2:
+        tarjeta_acceso(
+            "Trazabilidad",
+            "Consulta cambios de estado, responsables y acciones registradas.",
+            "pages/trazabilidad.py",
+            "🔎",
+        )
 
 
-if usuario_autenticado():
-    mostrar_inicio()
+# =========================================================
+# DEFINICIÓN DE PÁGINAS
+# =========================================================
+
+pagina_login = st.Page(mostrar_login, title="Iniciar sesión", icon="🔐", default=True)
+pagina_inicio = st.Page(mostrar_inicio, title="Inicio", icon="🏠", default=True)
+pagina_nueva_rendicion = st.Page("pages/nueva_rendicion.py", title="Nueva rendición", icon="🧾")
+pagina_mis_rendiciones = st.Page("pages/mis_rendiciones.py", title="Mis rendiciones", icon="📋")
+pagina_revision = st.Page("pages/revision.py", title="Revisión administrativa", icon="✅")
+pagina_trazabilidad = st.Page("pages/trazabilidad.py", title="Trazabilidad", icon="🔎")
+
+
+# =========================================================
+# NAVEGACIÓN DINÁMICA SEGÚN ROL
+# =========================================================
+
+if not usuario_autenticado():
+    navegacion = st.navigation([pagina_login], position="hidden")
+
 else:
-    mostrar_login()
+    rol_actual = st.session_state.get("rol")
+
+    if rol_actual == "trabajador":
+        paginas_disponibles = {
+            "PymeGestiona": [pagina_inicio],
+            "Rendiciones": [pagina_nueva_rendicion, pagina_mis_rendiciones],
+        }
+
+    elif rol_actual == "administrador":
+        paginas_disponibles = {
+            "PymeGestiona": [pagina_inicio],
+            "Administración": [pagina_revision, pagina_trazabilidad],
+        }
+
+    else:
+        st.error("La cuenta no tiene un rol válido configurado.")
+
+        if st.button("Cerrar sesión", use_container_width=True):
+            cerrar_sesion()
+
+        st.stop()
+
+    navegacion = st.navigation(paginas_disponibles, position="sidebar", expanded=True)
+
+
+navegacion.run()
