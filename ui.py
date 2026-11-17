@@ -491,6 +491,41 @@ def reglas_activadas(codigos: list[str]) -> None:
     st.warning(f"**Reglas activadas:** {detalle}", icon="⚠️")
 
 
+def campo_monto(etiqueta: str, clave: str, valor_inicial=0, ayuda: str | None = None):
+    """
+    Campo de monto en pesos con largo limitado: hasta 11 caracteres
+    (999.999.999). Acepta puntos de miles y devuelve un entero,
+    o None si se escribieron caracteres que no son números.
+    """
+    if clave not in st.session_state:
+        try:
+            st.session_state[clave] = str(int(float(valor_inicial or 0)))
+        except (TypeError, ValueError):
+            st.session_state[clave] = "0"
+
+    texto = st.text_input(
+        etiqueta,
+        key=clave,
+        max_chars=11,
+        placeholder="0",
+        help=ayuda or "Solo números, sin decimales. Máximo $999.999.999.",
+    )
+
+    limpio = texto.replace(".", "").replace("$", "").replace(" ", "")
+
+    if not limpio:
+        return 0
+
+    if not limpio.isdigit():
+        st.caption(":red[⛔ Escribe solo números.]")
+        return None
+
+    return int(limpio)
+
+
 def pie_pagina() -> None:
     st.divider()
-    st.caption("PymeGestiona © 2026 · Datos demostrativos")
+    st.caption(
+        "PymeGestiona · Prototipo académico INACAP · "
+        "Datos exclusivamente demostrativos"
+    )

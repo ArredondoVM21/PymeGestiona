@@ -12,9 +12,10 @@ from database import (
     obtener_configuracion_empresa,
     subir_comprobante,
 )
-from reglas import LIMITES, MONTO_MAXIMO, evaluar_reglas_locales
+from reglas import LIMITES, evaluar_reglas_locales
 from ui import (
     ICONOS_ESTADO,
+    campo_monto,
     badge_estado,
     badge_riesgo,
     checklist_reglas,
@@ -284,33 +285,24 @@ for rendicion in rendiciones_filtradas:
             monto_1, monto_2, monto_3 = st.columns(3)
 
             with monto_1:
-                monto_neto = st.number_input(
+                monto_neto = campo_monto(
                     "Monto neto",
-                    min_value=0,
-                    max_value=max(MONTO_MAXIMO, int(float(rendicion["monto_neto"]))),
-                    value=int(float(rendicion["monto_neto"])),
-                    step=100,
-                    key=f"neto_{rendicion['id']}",
+                    f"neto_{rendicion['id']}",
+                    rendicion["monto_neto"],
                 )
 
             with monto_2:
-                iva = st.number_input(
+                iva = campo_monto(
                     "IVA",
-                    min_value=0,
-                    max_value=max(MONTO_MAXIMO, int(float(rendicion["iva"]))),
-                    value=int(float(rendicion["iva"])),
-                    step=100,
-                    key=f"iva_{rendicion['id']}",
+                    f"iva_{rendicion['id']}",
+                    rendicion["iva"],
                 )
 
             with monto_3:
-                monto_total = st.number_input(
+                monto_total = campo_monto(
                     "Monto total",
-                    min_value=0,
-                    max_value=max(MONTO_MAXIMO, int(float(rendicion["monto_total"]))),
-                    value=int(float(rendicion["monto_total"])),
-                    step=100,
-                    key=f"total_{rendicion['id']}",
+                    f"total_{rendicion['id']}",
+                    rendicion["monto_total"],
                 )
 
             calcular_automaticamente = st.checkbox(
@@ -337,6 +329,10 @@ for rendicion in rendiciones_filtradas:
             )
 
         if not reenviar:
+            continue
+
+        if None in (monto_neto, iva, monto_total):
+            st.error("Los montos deben tener solo números.")
             continue
 
         if calcular_automaticamente:

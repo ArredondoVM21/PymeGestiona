@@ -19,6 +19,7 @@ from reglas import (
     validar_rut,
 )
 from ui import (
+    campo_monto,
     checklist_reglas,
     encabezado,
     formatear_moneda,
@@ -237,9 +238,6 @@ elif paso == 1:
         ("nr_proveedor", "proveedor"),
         ("nr_folio", "folio"),
         ("nr_fecha", "fecha_documento"),
-        ("nr_neto", "monto_neto"),
-        ("nr_iva", "iva"),
-        ("nr_total", "monto_total"),
         ("nr_iva_auto", "iva_automatico"),
     ]:
         sembrar(clave, campo)
@@ -299,17 +297,17 @@ elif paso == 1:
 
         iva_automatico = st.toggle("Calcular IVA (19 %) y total desde el neto", key="nr_iva_auto")
 
-        monto_neto = st.number_input(
-            "Monto neto", min_value=0, max_value=MONTO_MAXIMO, step=1000, key="nr_neto"
-        )
+        monto_neto = campo_monto("Monto neto", "nr_neto", borrador["monto_neto"])
+        montos_invalidos = monto_neto is None
+        monto_neto = monto_neto or 0
 
         if iva_automatico:
             iva = round(monto_neto * TASA_IVA)
             monto_total = monto_neto + iva
 
             # Deja listos los valores por si se cambia a ingreso manual.
-            st.session_state["nr_iva"] = iva
-            st.session_state["nr_total"] = monto_total
+            st.session_state["nr_iva"] = str(iva)
+            st.session_state["nr_total"] = str(monto_total)
 
             columna_iva, columna_total = st.columns(2)
             columna_iva.metric("IVA (19 %)", formatear_moneda(iva))
@@ -319,10 +317,14 @@ elif paso == 1:
             columna_iva, columna_total = st.columns(2)
 
             with columna_iva:
-                iva = st.number_input("IVA", min_value=0, max_value=MONTO_MAXIMO, step=100, key="nr_iva")
+                iva = campo_monto("IVA", "nr_iva", borrador["iva"])
 
             with columna_total:
-                monto_total = st.number_input("Total", min_value=0, max_value=MONTO_MAXIMO, step=100, key="nr_total")
+                monto_total = campo_monto("Total", "nr_total", borrador["monto_total"])
+
+            montos_invalidos = montos_invalidos or iva is None or monto_total is None
+            iva = iva or 0
+            monto_total = monto_total or 0
 
         if monto_total > limite_rendicion:
             st.caption(
@@ -345,7 +347,10 @@ elif paso == 1:
     elif error_folio:
         pendientes.append("folio válido")
 
-    if monto_total <= 0:
+    if montos_invalidos:
+        pendientes.append("montos solo con números")
+
+    elif monto_total <= 0:
         pendientes.append("total mayor a $0")
 
     elif monto_total > MONTO_MAXIMO:
