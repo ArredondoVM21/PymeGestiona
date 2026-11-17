@@ -314,9 +314,9 @@ def mostrar_barra_lateral(secciones: dict, pagina_actual) -> None:
     activa destacada y botón para cerrar sesión.
     """
     with st.sidebar:
-        st.markdown(marca_html(), unsafe_allow_html=True)
         st.markdown(
-            usuario_html(st.session_state.get("nombre"), st.session_state.get("rol")),
+            marca_html()
+            + usuario_html(st.session_state.get("nombre"), st.session_state.get("rol")),
             unsafe_allow_html=True,
         )
 

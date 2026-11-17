@@ -161,7 +161,10 @@ def aplicar_estilos() -> None:
 
         /* Barra lateral */
         section[data-testid="stSidebar"] {background: #FFFFFF; border-right: 1px solid #E4E4E7;}
-        section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {gap: .35rem;}
+        section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {gap: .4rem;}
+        /* Streamlit agrega un margen negativo a los bloques de texto: se anula en la barra */
+        section[data-testid="stSidebar"] .stMarkdown,
+        section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {margin-bottom: 0 !important;}
         .pg-marca {display: flex; gap: .75rem; align-items: center; margin: 0 0 1rem 0;}
         .pg-marca .logo {
             width: 44px; height: 44px; border-radius: 12px; flex-shrink: 0;
@@ -182,8 +185,9 @@ def aplicar_estilos() -> None:
         .pg-usuario b {display: block; font-size: .92rem; color: #09090B; line-height: 1.2;}
         .pg-usuario small {color: #71717A; font-size: .78rem;}
         .pg-nav-seccion {
-            font-size: .7rem; text-transform: uppercase; letter-spacing: .07em;
-            color: #A1A1AA; font-weight: 600; margin: .7rem 0 .1rem .3rem;
+            font-size: .7rem !important; line-height: 1.2 !important;
+            text-transform: uppercase; letter-spacing: .07em;
+            color: #A1A1AA; font-weight: 600; padding: .75rem 0 .1rem .35rem;
         }
         .pg-nav-activo {
             display: flex; gap: .65rem; align-items: center; padding: .7rem .9rem;
@@ -251,7 +255,7 @@ def nav_activo_html(icono: str, titulo: str) -> str:
 
 
 def nav_seccion_html(titulo: str) -> str:
-    return f'<p class="pg-nav-seccion">{html.escape(titulo)}</p>'
+    return f'<div class="pg-nav-seccion">{html.escape(titulo)}</div>'
 
 
 # =========================================================
