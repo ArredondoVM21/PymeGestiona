@@ -164,7 +164,7 @@ def mostrar_login() -> None:
                 """
             )
 
-        st.caption("Prototipo académico desplegado en la nube · INACAP")
+        st.caption("PymeGestiona © 2026 · Datos demostrativos")
 
 
 # =========================================================

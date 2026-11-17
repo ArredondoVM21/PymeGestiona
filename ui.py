@@ -493,7 +493,4 @@ def reglas_activadas(codigos: list[str]) -> None:
 
 def pie_pagina() -> None:
     st.divider()
-    st.caption(
-        "PymeGestiona · Prototipo académico INACAP · "
-        "Datos exclusivamente demostrativos"
-    )
+    st.caption("PymeGestiona © 2026 · Datos demostrativos")
