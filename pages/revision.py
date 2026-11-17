@@ -1,3 +1,5 @@
+import html
+
 import streamlit as st
 
 from auth import exigir_rol, mostrar_sidebar_usuario
@@ -8,7 +10,8 @@ from database import (
 )
 from ui import (
     badge_estado,
-    badge_riesgo,
+    badge_validacion,
+    checklist_codigos,
     encabezado,
     ficha,
     formatear_fecha,
@@ -16,7 +19,6 @@ from ui import (
     kpis,
     mostrar_badges,
     pie_pagina,
-    reglas_activadas,
 )
 
 
@@ -25,23 +27,190 @@ mostrar_sidebar_usuario()
 
 encabezado(
     "✅",
-    "Revisión administrativa",
-    "Revisa las rendiciones pendientes o reenviadas y registra tu decisión.",
+    "Revisión de rendiciones",
+    "Rendiciones pendientes o reenviadas. Abre una para ver el comprobante y decidir.",
 )
 
 empresa_id = st.session_state["empresa_id"]
 administrador_id = st.session_state["usuario_id"]
 
 EXTENSIONES_IMAGEN = (".jpg", ".jpeg", ".png", ".webp")
-ORDEN_RIESGO = {"Alto": 0, "Medio": 1, "Bajo": 2}
+
+MOTIVOS_FRECUENTES = [
+    "El comprobante no se lee con claridad.",
+    "El monto no coincide con el comprobante.",
+    "El gasto no corresponde a una actividad de la empresa.",
+    "Falta la factura a nombre de la empresa.",
+]
+
+# Ventana emergente: st.dialog en versiones nuevas,
+# st.experimental_dialog en algunas anteriores.
+DIALOGO = getattr(st, "dialog", None) or getattr(st, "experimental_dialog", None)
 
 # Mensaje guardado antes de st.rerun() para que no se pierda.
 if "mensaje_exito" in st.session_state:
     st.success(st.session_state.pop("mensaje_exito"), icon="✅")
 
 
+def validacion(rendicion: dict) -> str:
+    """
+    Cumple = sin reglas activadas. En riesgo = con alertas
+    (las bloqueantes nunca llegan a esta bandeja).
+    """
+    return "riesgo" if rendicion.get("reglas_activadas") else "cumple"
+
+
+def nombre_trabajador(rendicion: dict) -> str:
+    trabajador = rendicion.get("trabajador") or {}
+    return trabajador.get("nombre", f"Usuario #{rendicion['usuario_id']}")
+
+
 # =========================================================
-# CONSULTA
+# PANEL DE REVISIÓN (se abre en la ventana emergente)
+# =========================================================
+
+def panel_revision(rendicion: dict) -> None:
+    rid = rendicion["id"]
+
+    mostrar_badges(
+        badge_validacion(validacion(rendicion)),
+        badge_estado(rendicion["estado"]),
+    )
+
+    if rendicion["estado"] == "Reenviada":
+        st.info("El trabajador corrigió esta rendición después de un rechazo.", icon="🔁")
+
+    columna_comprobante, columna_datos = st.columns([1, 1.3])
+
+    with columna_comprobante:
+        ruta_archivo = rendicion.get("archivo_url")
+
+        if not ruta_archivo:
+            st.error("Sin comprobante adjunto.")
+
+        else:
+            try:
+                url = generar_url_comprobante(ruta_archivo, 600)
+
+                if url and ruta_archivo.lower().endswith(EXTENSIONES_IMAGEN):
+                    st.image(url)
+
+                if url:
+                    st.link_button("📎 Abrir comprobante", url, use_container_width=True)
+
+            except Exception:
+                st.warning("No fue posible abrir el comprobante.")
+
+    with columna_datos:
+        ficha(
+            [
+                ("Trabajador", nombre_trabajador(rendicion)),
+                ("Enviada", formatear_fecha(rendicion["fecha_envio"])),
+                ("Documento", f"{rendicion['tipo_documento']} N° {rendicion['folio']}"),
+                ("Fecha", formatear_fecha(rendicion["fecha_documento"], con_hora=False)),
+                ("RUT emisor", rendicion["rut_emisor"]),
+                ("Categoría", rendicion["categoria"]),
+                ("Neto", formatear_moneda(rendicion["monto_neto"])),
+                ("IVA", formatear_moneda(rendicion["iva"])),
+            ]
+        )
+        st.metric("Total", formatear_moneda(rendicion["monto_total"]))
+
+        if rendicion.get("descripcion"):
+            st.caption(f"📝 {rendicion['descripcion']}")
+
+    st.markdown("##### Validación R1–R6")
+    checklist_codigos(rendicion.get("reglas_activadas") or [])
+
+    st.divider()
+    st.markdown("##### Decisión")
+
+    decision = st.radio(
+        "Decisión",
+        ["✅ Aprobar", "❌ Rechazar"],
+        index=None,
+        horizontal=True,
+        label_visibility="collapsed",
+        key=f"decision_{rid}",
+    )
+
+    motivo = ""
+
+    if decision == "❌ Rechazar":
+        sugerido = st.selectbox(
+            "Motivo frecuente (opcional)",
+            MOTIVOS_FRECUENTES,
+            index=None,
+            placeholder="Elige uno o escribe el tuyo abajo",
+            key=f"sugerido_{rid}",
+        )
+
+        detalle = st.text_area(
+            "Motivo del rechazo",
+            max_chars=500,
+            placeholder="Explica qué debe corregir el trabajador.",
+            key=f"motivo_{rid}",
+        )
+
+        motivo = " ".join(parte for parte in [sugerido or "", detalle.strip()] if parte)
+
+        if len(motivo) < 10:
+            st.caption(":red[El motivo es obligatorio (mínimo 10 caracteres).]")
+
+    confirmar = st.checkbox(
+        "Revisé los datos y el comprobante.",
+        key=f"confirmar_{rid}",
+    )
+
+    puede_guardar = (
+        confirmar
+        and decision is not None
+        and (decision == "✅ Aprobar" or len(motivo) >= 10)
+    )
+
+    etiqueta = (
+        "Elige una decisión" if decision is None
+        else f"Aprobar {formatear_moneda(rendicion['monto_total'])}" if decision == "✅ Aprobar"
+        else "Rechazar con motivo"
+    )
+
+    if st.button(etiqueta, type="primary", use_container_width=True, disabled=not puede_guardar, key=f"guardar_{rid}"):
+        nuevo_estado = "Aprobada" if decision == "✅ Aprobar" else "Rechazada"
+        guardado = False
+
+        try:
+            resolver_rendicion(
+                rendicion_id=rid,
+                empresa_id=empresa_id,
+                administrador_id=administrador_id,
+                nuevo_estado=nuevo_estado,
+                motivo_rechazo=motivo,
+            )
+            guardado = True
+
+        except Exception as error:
+            st.error("No fue posible guardar la decisión.")
+            st.code(str(error))
+
+        # st.rerun() fuera del try: cierra la ventana y recarga la bandeja.
+        if guardado:
+            st.session_state["mensaje_exito"] = f"Rendición #{rid} {nuevo_estado.lower()}."
+            st.session_state.pop("revisando", None)
+            st.rerun()
+
+
+def abrir_revision(rendicion: dict) -> None:
+    if DIALOGO is not None:
+        DIALOGO(f"Rendición #{rendicion['id']} · {rendicion['proveedor']}", width="large")(panel_revision)(rendicion)
+
+    else:
+        # Respaldo para versiones sin ventanas emergentes.
+        st.session_state["revisando"] = rendicion["id"]
+        st.rerun()
+
+
+# =========================================================
+# CONSULTA E INDICADORES
 # =========================================================
 
 try:
@@ -52,188 +221,107 @@ except Exception as error:
     st.code(str(error))
     st.stop()
 
-riesgos = [rendicion["nivel_riesgo"] for rendicion in rendiciones]
+en_riesgo = [r for r in rendiciones if validacion(r) == "riesgo"]
 
 kpis(
     [
-        ("Por revisar", len(rendiciones)),
-        ("Riesgo alto", riesgos.count("Alto")),
-        ("Riesgo medio", riesgos.count("Medio")),
-        ("Reenviadas", sum(1 for r in rendiciones if r["estado"] == "Reenviada")),
+        ("Por revisar", len(rendiciones), "Pendientes y reenviadas"),
+        ("Cumplen", len(rendiciones) - len(en_riesgo), "Sin alertas", "verde"),
+        ("En riesgo", len(en_riesgo), "Con alertas R2 o R3", "ambar"),
+        ("Monto por revisar", formatear_moneda(sum(float(r["monto_total"] or 0) for r in rendiciones)), "Total pendiente"),
     ]
 )
 
-st.write("")
-
 if not rendiciones:
-    st.success("No hay rendiciones pendientes de revisión. ¡Todo al día!", icon="🎉")
+    st.success("No hay rendiciones pendientes. ¡Todo al día!", icon="🎉")
     pie_pagina()
     st.stop()
 
 
+# Respaldo sin ventanas emergentes: el panel se muestra arriba de la lista.
+if DIALOGO is None and st.session_state.get("revisando"):
+    seleccionada = next((r for r in rendiciones if r["id"] == st.session_state["revisando"]), None)
+
+    if seleccionada:
+        with st.container(border=True):
+            if st.button("✕ Cerrar revisión"):
+                st.session_state.pop("revisando", None)
+                st.rerun()
+
+            panel_revision(seleccionada)
+
+
 # =========================================================
-# ORDEN
+# FILTROS Y ORDEN
 # =========================================================
 
-orden = st.radio(
-    "Ordenar por",
-    ["Más antiguas primero", "Mayor riesgo primero", "Mayor monto primero"],
-    horizontal=True,
-)
+filtro_1, filtro_2 = st.columns([1.3, 1])
 
-if orden == "Mayor riesgo primero":
-    rendiciones.sort(key=lambda r: ORDEN_RIESGO.get(r["nivel_riesgo"], 3))
+with filtro_1:
+    filtro = st.radio(
+        "Mostrar",
+        [
+            f"Todas ({len(rendiciones)})",
+            f"Cumple ({len(rendiciones) - len(en_riesgo)})",
+            f"En riesgo ({len(en_riesgo)})",
+        ],
+        horizontal=True,
+    )
+
+with filtro_2:
+    orden = st.selectbox(
+        "Ordenar por",
+        ["Más antiguas primero", "En riesgo primero", "Mayor monto primero"],
+    )
+
+if filtro.startswith("Cumple"):
+    rendiciones = [r for r in rendiciones if validacion(r) == "cumple"]
+
+elif filtro.startswith("En riesgo"):
+    rendiciones = en_riesgo
+
+if orden == "En riesgo primero":
+    rendiciones = sorted(rendiciones, key=lambda r: validacion(r) != "riesgo")
 
 elif orden == "Mayor monto primero":
-    rendiciones.sort(key=lambda r: float(r["monto_total"] or 0), reverse=True)
+    rendiciones = sorted(rendiciones, key=lambda r: float(r["monto_total"] or 0), reverse=True)
+
+if not rendiciones:
+    st.info("No hay rendiciones con este filtro.")
 
 
 # =========================================================
-# LISTADO
+# BANDEJA
 # =========================================================
 
 for rendicion in rendiciones:
-    trabajador = rendicion.get("trabajador") or {}
-    nombre_trabajador = trabajador.get("nombre", f"Usuario #{rendicion['usuario_id']}")
+    with st.container(border=True):
+        columna_info, columna_monto, columna_accion = st.columns([3, 1.6, 1])
 
-    icono_riesgo = {"Alto": "🔴", "Medio": "🟠", "Bajo": "🟢"}.get(rendicion["nivel_riesgo"], "⚪")
-
-    titulo = (
-        f"{icono_riesgo} #{rendicion['id']} · {rendicion['proveedor']} · "
-        f"{formatear_moneda(rendicion['monto_total'])} · {nombre_trabajador}"
-    )
-
-    with st.expander(titulo):
-        mostrar_badges(
-            badge_estado(rendicion["estado"]),
-            badge_riesgo(rendicion["nivel_riesgo"]),
-        )
-
-        if rendicion["estado"] == "Reenviada":
-            st.info(
-                "El trabajador corrigió esta rendición después de un rechazo anterior.",
-                icon="🔁",
+        with columna_info:
+            reglas = rendicion.get("reglas_activadas") or []
+            st.markdown(
+                f'<div class="pg-fila"><b>#{rendicion["id"]} · {html.escape(rendicion["proveedor"])}</b><br>'
+                f"<small>{html.escape(nombre_trabajador(rendicion))} · "
+                f"{html.escape(rendicion['tipo_documento'])} N° {html.escape(str(rendicion['folio']))} · "
+                f"{formatear_fecha(rendicion['fecha_documento'], con_hora=False)}"
+                f"{' · 🔁 Reenviada' if rendicion['estado'] == 'Reenviada' else ''}"
+                f"{' · Reglas: ' + ', '.join(reglas) if reglas else ''}</small></div>",
+                unsafe_allow_html=True,
             )
 
-        detalle, comprobante = st.columns([1.4, 1])
-
-        with detalle:
-            ficha(
-                [
-                    ("Trabajador", nombre_trabajador),
-                    ("Enviada", formatear_fecha(rendicion["fecha_envio"])),
-                    ("Tipo", rendicion["tipo_documento"]),
-                    ("Fecha del documento", formatear_fecha(rendicion["fecha_documento"], con_hora=False)),
-                    ("RUT emisor", rendicion["rut_emisor"]),
-                    ("Folio", rendicion["folio"]),
-                    ("Proveedor", rendicion["proveedor"]),
-                    ("Categoría", rendicion["categoria"]),
-                    ("Neto", formatear_moneda(rendicion["monto_neto"])),
-                    ("IVA", formatear_moneda(rendicion["iva"])),
-                    ("Total", formatear_moneda(rendicion["monto_total"])),
-                ]
+        with columna_monto:
+            st.markdown(
+                f'<div class="pg-monto">{formatear_moneda(rendicion["monto_total"])}</div>'
+                f"{badge_validacion(validacion(rendicion))}",
+                unsafe_allow_html=True,
             )
 
-            if rendicion.get("descripcion"):
-                st.caption(f"📝 {rendicion['descripcion']}")
+        with columna_accion:
+            if st.button("Revisar →", key=f"abrir_{rendicion['id']}", use_container_width=True):
+                abrir_revision(rendicion)
 
-            reglas_activadas(rendicion.get("reglas_activadas") or [])
 
-            try:
-                neto = float(rendicion["monto_neto"])
-                iva = float(rendicion["iva"])
-                total = float(rendicion["monto_total"])
-
-                if abs((neto + iva) - total) >= 1:
-                    st.warning(
-                        f"Neto + IVA = {formatear_moneda(neto + iva)}, "
-                        "distinto del total informado."
-                    )
-
-            except (TypeError, ValueError):
-                st.warning("No fue posible comprobar los montos.")
-
-        with comprobante:
-            ruta_archivo = rendicion.get("archivo_url")
-
-            if not ruta_archivo:
-                st.error("La rendición no tiene comprobante.")
-
-            else:
-                try:
-                    url = generar_url_comprobante(ruta_archivo, 600)
-
-                    if url and ruta_archivo.lower().endswith(EXTENSIONES_IMAGEN):
-                        st.image(url, caption="Comprobante")
-
-                    if url:
-                        st.link_button("📎 Abrir en otra pestaña", url, use_container_width=True)
-                        st.caption("Enlace válido durante 10 minutos.")
-
-                except Exception:
-                    st.warning("No fue posible abrir el comprobante.")
-
-        # =================================================
-        # DECISIÓN
-        # =================================================
-
-        with st.form(f"decision_{rendicion['id']}"):
-            st.markdown("#### Decisión administrativa")
-
-            decision = st.radio(
-                "Decisión",
-                ["Aprobar", "Rechazar"],
-                horizontal=True,
-                key=f"decision_radio_{rendicion['id']}",
-            )
-
-            motivo = st.text_area(
-                "Motivo del rechazo (obligatorio si rechazas)",
-                max_chars=500,
-                placeholder="Ej.: el total no coincide con el comprobante adjunto.",
-                key=f"motivo_{rendicion['id']}",
-            )
-
-            confirmar = st.checkbox(
-                "Confirmo que revisé los datos y el comprobante.",
-                key=f"confirmar_{rendicion['id']}",
-            )
-
-            guardar = st.form_submit_button(
-                "Guardar decisión",
-                type="primary",
-                use_container_width=True,
-            )
-
-        if not guardar:
-            continue
-
-        if not confirmar:
-            st.error("Debes confirmar la revisión.")
-
-        elif decision == "Rechazar" and not motivo.strip():
-            st.error("Debes indicar el motivo del rechazo.")
-
-        else:
-            nuevo_estado = "Aprobada" if decision == "Aprobar" else "Rechazada"
-
-            try:
-                resolver_rendicion(
-                    rendicion_id=rendicion["id"],
-                    empresa_id=empresa_id,
-                    administrador_id=administrador_id,
-                    nuevo_estado=nuevo_estado,
-                    motivo_rechazo=motivo,
-                )
-
-                st.session_state["mensaje_exito"] = (
-                    f"Rendición #{rendicion['id']} {nuevo_estado.lower()} correctamente."
-                )
-                st.rerun()
-
-            except Exception as error:
-                st.error("No fue posible guardar la decisión.")
-                st.code(str(error))
-
+st.caption("🟢 Cumple: sin alertas · 🟠 En riesgo: alertas R2 (monto) o R3 (antigüedad) que no bloquean el envío.")
 
 pie_pagina()

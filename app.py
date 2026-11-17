@@ -79,7 +79,7 @@ def mostrar_login() -> None:
     """
     Formulario de acceso centrado, sin navegación interna.
     """
-    _, centro, _ = st.columns([1, 1.3, 1])
+    _, centro, _ = st.columns([1, 1.6, 1])
 
     with centro:
         st.markdown("<div style='height:3rem'></div>", unsafe_allow_html=True)
@@ -146,10 +146,9 @@ def mostrar_login() -> None:
         with st.expander("Credenciales demostrativas"):
             st.markdown(
                 """
-                | Perfil | Correo | Contraseña |
-                |---|---|---|
-                | Trabajador | `trabajador@pymegestiona.cl` | `Demo1234!` |
-                | Administrador | `admin@pymegestiona.cl` | `Admin1234!` |
+                **Trabajador:** `trabajador@pymegestiona.cl` · `Demo1234!`
+
+                **Administrador:** `admin@pymegestiona.cl` · `Admin1234!`
 
                 Estas cuentas contienen exclusivamente datos demostrativos.
                 """
