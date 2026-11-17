@@ -67,7 +67,7 @@ def aplicar_estilos() -> None:
     st.markdown(
         """
         <style>
-        .block-container {padding-top: 2rem; padding-bottom: 4rem; max-width: 1100px;}
+        .block-container {padding-top: 4.5rem; padding-bottom: 4rem; max-width: 1100px;}
         h1, h2, h3, h4 {letter-spacing: -0.01em;}
         [data-testid="stHeaderActionElements"] {display: none;}
 
@@ -80,7 +80,7 @@ def aplicar_estilos() -> None:
 
         /* Encabezado */
         .pg-encabezado {margin-bottom: 1.1rem;}
-        .pg-encabezado h1 {font-size: 1.8rem; margin: 0; padding: 0; font-weight: 700;}
+        .pg-encabezado h1 {font-size: 1.8rem; margin: 0; padding: 0; font-weight: 700; line-height: 1.25;}
         .pg-encabezado p {color: #52525B; margin: .25rem 0 0 0;}
 
         /* Etiquetas */
@@ -159,9 +159,46 @@ def aplicar_estilos() -> None:
         .pg-evento {border-left: 3px solid #D4D4D8; padding: .1rem 0 .8rem 1rem; margin-left: .4rem;}
         .pg-evento small {color: #71717A;}
 
+        /* Barra lateral */
+        section[data-testid="stSidebar"] {background: #FFFFFF; border-right: 1px solid #E4E4E7;}
+        section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {gap: .35rem;}
+        .pg-marca {display: flex; gap: .75rem; align-items: center; margin: 0 0 1rem 0;}
+        .pg-marca .logo {
+            width: 44px; height: 44px; border-radius: 12px; flex-shrink: 0;
+            background: linear-gradient(135deg, #1D4ED8, #3B82F6); color: #FFFFFF;
+            display: grid; place-items: center; font-weight: 700; font-size: 1rem;
+            box-shadow: 0 6px 14px rgba(29, 78, 216, .25);
+        }
+        .pg-marca b {display: block; font-size: 1.08rem; color: #09090B; line-height: 1.2;}
+        .pg-marca small {color: #1D4ED8; font-size: .8rem; font-weight: 500;}
+        .pg-usuario {
+            display: flex; gap: .7rem; align-items: center; margin-bottom: .6rem;
+            background: #F8FAFC; border: 1px solid #E4E4E7; border-radius: 12px; padding: .65rem .75rem;
+        }
+        .pg-usuario .avatar {
+            width: 36px; height: 36px; border-radius: 999px; flex-shrink: 0;
+            background: #DBEAFE; color: #1D4ED8; display: grid; place-items: center; font-weight: 700;
+        }
+        .pg-usuario b {display: block; font-size: .92rem; color: #09090B; line-height: 1.2;}
+        .pg-usuario small {color: #71717A; font-size: .78rem;}
+        .pg-nav-seccion {
+            font-size: .7rem; text-transform: uppercase; letter-spacing: .07em;
+            color: #A1A1AA; font-weight: 600; margin: .7rem 0 .1rem .3rem;
+        }
+        .pg-nav-activo {
+            display: flex; gap: .65rem; align-items: center; padding: .7rem .9rem;
+            border-radius: 12px; color: #FFFFFF; font-weight: 600; font-size: .95rem;
+            background: linear-gradient(135deg, #1D4ED8, #3B82F6);
+            box-shadow: 0 6px 16px rgba(29, 78, 216, .28);
+        }
+        section[data-testid="stSidebar"] [data-testid="stPageLink-NavLink"] {
+            padding: .55rem .9rem; border-radius: 12px;
+        }
+        section[data-testid="stSidebar"] [data-testid="stPageLink-NavLink"]:hover {background: #F1F5F9;}
+
         /* Celular */
         @media (max-width: 640px) {
-            .block-container {padding: 1.1rem .85rem 5rem .85rem;}
+            .block-container {padding: 3.75rem .85rem 5rem .85rem;}
             .pg-encabezado h1 {font-size: 1.45rem;}
             .pg-kpis {grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem;}
             .pg-kpi {padding: .7rem .8rem;}
@@ -174,6 +211,47 @@ def aplicar_estilos() -> None:
         """,
         unsafe_allow_html=True,
     )
+
+
+def ocultar_barra_lateral() -> None:
+    """
+    Oculta la barra lateral y su botón (se usa en el inicio de sesión).
+    """
+    st.markdown(
+        """
+        <style>
+        section[data-testid="stSidebar"],
+        [data-testid="stSidebarCollapsedControl"],
+        [data-testid="collapsedControl"],
+        [data-testid="stSidebarCollapseButton"] {display: none !important;}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def marca_html() -> str:
+    return (
+        '<div class="pg-marca"><div class="logo">PG</div>'
+        "<div><b>PymeGestiona</b><small>Control de rendiciones</small></div></div>"
+    )
+
+
+def usuario_html(nombre: str, rol: str) -> str:
+    inicial = (nombre or "U").strip()[:1].upper()
+    return (
+        f'<div class="pg-usuario"><div class="avatar">{html.escape(inicial)}</div>'
+        f"<div><b>{html.escape(nombre or 'Usuario')}</b>"
+        f"<small>{html.escape((rol or '').capitalize())}</small></div></div>"
+    )
+
+
+def nav_activo_html(icono: str, titulo: str) -> str:
+    return f'<div class="pg-nav-activo"><span>{icono}</span>{html.escape(titulo)}</div>'
+
+
+def nav_seccion_html(titulo: str) -> str:
+    return f'<p class="pg-nav-seccion">{html.escape(titulo)}</p>'
 
 
 # =========================================================

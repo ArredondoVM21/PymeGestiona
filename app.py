@@ -19,7 +19,12 @@ from ui import (
     encabezado,
     formatear_moneda,
     kpis,
+    marca_html,
+    nav_activo_html,
+    nav_seccion_html,
+    ocultar_barra_lateral,
     pie_pagina,
+    usuario_html,
 )
 
 
@@ -31,13 +36,18 @@ st.set_page_config(
     page_title="PymeGestiona",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="expanded",
+    # "auto": abierta en el computador y cerrada en el celular.
+    initial_sidebar_state="auto",
 )
 
 # Con st.navigation, app.py se ejecuta en cada página,
 # por lo que los estilos quedan aplicados en todo el sistema.
 aplicar_estilos()
 inicializar_sesion()
+
+# En el inicio de sesión no se muestra la barra lateral.
+if not usuario_autenticado():
+    ocultar_barra_lateral()
 
 
 # =========================================================
@@ -295,6 +305,38 @@ def mostrar_panel_administrador() -> None:
 
 
 # =========================================================
+# BARRA LATERAL
+# =========================================================
+
+def mostrar_barra_lateral(secciones: dict, pagina_actual) -> None:
+    """
+    Marca, tarjeta del usuario, menú por secciones con la página
+    activa destacada y botón para cerrar sesión.
+    """
+    with st.sidebar:
+        st.markdown(marca_html(), unsafe_allow_html=True)
+        st.markdown(
+            usuario_html(st.session_state.get("nombre"), st.session_state.get("rol")),
+            unsafe_allow_html=True,
+        )
+
+        for seccion, paginas in secciones.items():
+            st.markdown(nav_seccion_html(seccion), unsafe_allow_html=True)
+
+            for pagina in paginas:
+                if pagina.title == pagina_actual.title:
+                    st.markdown(nav_activo_html(pagina.icon, pagina.title), unsafe_allow_html=True)
+
+                else:
+                    st.page_link(pagina, label=pagina.title, icon=pagina.icon)
+
+        st.divider()
+
+        if st.button("Cerrar sesión", icon="🚪", use_container_width=True):
+            cerrar_sesion()
+
+
+# =========================================================
 # DEFINICIÓN DE PÁGINAS
 # =========================================================
 
@@ -318,13 +360,13 @@ else:
 
     if rol_actual == "trabajador":
         paginas_disponibles = {
-            "PymeGestiona": [pagina_inicio],
+            "General": [pagina_inicio],
             "Rendiciones": [pagina_nueva_rendicion, pagina_mis_rendiciones],
         }
 
     elif rol_actual == "administrador":
         paginas_disponibles = {
-            "PymeGestiona": [pagina_inicio],
+            "General": [pagina_inicio],
             "Administración": [pagina_revision, pagina_trazabilidad],
         }
 
@@ -336,7 +378,9 @@ else:
 
         st.stop()
 
-    navegacion = st.navigation(paginas_disponibles, position="sidebar", expanded=True)
+    # El menú propio reemplaza al de Streamlit para poder darle estilo.
+    navegacion = st.navigation(paginas_disponibles, position="hidden")
+    mostrar_barra_lateral(paginas_disponibles, navegacion)
 
 
 navegacion.run()

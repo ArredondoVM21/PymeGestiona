@@ -130,27 +130,8 @@ def exigir_rol(roles_permitidos: list[str]) -> None:
 
 def mostrar_sidebar_usuario() -> None:
     """
-    Muestra la tarjeta del usuario y el cierre de sesión.
+    La barra lateral (marca, usuario, menú y cierre de sesión) ahora
+    se construye una sola vez en app.py. Esta función se mantiene
+    vacía para que las páginas que la llaman sigan funcionando.
     """
-    if usuario_autenticado():
-        with st.sidebar:
-            st.divider()
-
-            iconos_rol = {"trabajador": "👷", "administrador": "🛡️"}
-            rol = st.session_state["rol"]
-
-            with st.container(border=True):
-                st.markdown(
-                    f"{iconos_rol.get(rol, '👤')} **{st.session_state['nombre']}**"
-                )
-                st.caption(
-                    f"{rol.capitalize()} · {st.session_state['correo']}"
-                )
-
-            if st.button(
-                "Cerrar sesión",
-                icon="🚪",
-                type="secondary",
-                use_container_width=True,
-            ):
-                cerrar_sesion()
+    return None
