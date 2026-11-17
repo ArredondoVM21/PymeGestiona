@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 
 import streamlit as st
 
@@ -190,28 +190,59 @@ pasos(paso, NOMBRES_PASOS)
 if paso == 0:
     with st.container(border=True):
         st.markdown("#### 📸 Foto o archivo del comprobante")
-        st.caption(
-            "En el celular puedes usar la cámara. Apoya la boleta sobre una "
-            "superficie plana y con luz: deben leerse el folio, la fecha y el total."
+
+        # La cámara se abre dentro de la página (st.camera_input). Así el
+        # celular no cambia a la app de cámara, que en varios teléfonos
+        # cierra el navegador para liberar memoria y recarga la página.
+        modo = st.radio(
+            "¿Cómo quieres adjuntarlo?",
+            ["📷 Tomar foto", "📁 Subir archivo"],
+            horizontal=True,
+            key="nr_modo",
         )
 
-        archivo = st.file_uploader(
-            "Comprobante",
-            type=["jpg", "jpeg", "png", "webp", "pdf"],
-            label_visibility="collapsed",
-            key="nr_archivo",
-        )
-
-        if archivo is not None:
-            borrador["archivo"] = ArchivoGuardado(
-                archivo.name,
-                archivo.type,
-                archivo.getvalue(),
+        if modo == "📷 Tomar foto":
+            st.caption(
+                "Permite el acceso a la cámara cuando el navegador lo pida. "
+                "Apoya la boleta sobre una superficie plana y con luz: deben "
+                "leerse el folio, la fecha y el total."
             )
+            foto = st.camera_input(
+                "Tomar foto del comprobante",
+                label_visibility="collapsed",
+                key="nr_camara",
+            )
+            if foto is not None:
+                borrador["archivo"] = ArchivoGuardado(
+                    f"foto_{datetime.now():%Y%m%d_%H%M%S}.jpg",
+                    "image/jpeg",
+                    foto.getvalue(),
+                )
+
+        else:
+            st.caption(
+                "Elige una foto de la galería o un PDF (máximo 5 MB). "
+                "Si la página se recarga al usar la cámara del teléfono, "
+                "saca la foto antes y luego elígela desde la galería."
+            )
+            archivo = st.file_uploader(
+                "Comprobante",
+                type=["jpg", "jpeg", "png", "webp", "pdf"],
+                label_visibility="collapsed",
+                key="nr_archivo",
+            )
+            if archivo is not None:
+                borrador["archivo"] = ArchivoGuardado(
+                    archivo.name,
+                    archivo.type,
+                    archivo.getvalue(),
+                )
 
         if borrador["archivo"] is not None:
             if borrador["archivo"].type.startswith("image/"):
-                st.image(borrador["archivo"].getvalue(), width=240)
+                # En modo cámara la foto ya se ve en el propio componente.
+                if modo != "📷 Tomar foto" or st.session_state.get("nr_camara") is None:
+                    st.image(borrador["archivo"].getvalue(), width=240)
 
             else:
                 st.caption(f"📄 {borrador['archivo'].name}")
