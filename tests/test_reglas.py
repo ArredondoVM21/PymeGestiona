@@ -13,6 +13,8 @@ from reglas import (
     normalizar_rut,
     normalizar_folio,
     validar_rut,
+    validar_folio,
+    MONTO_MAXIMO,
 )
 
 
@@ -242,3 +244,51 @@ def test_reglas_bloqueantes_impiden_el_envio(datos, archivo, regla):
 def test_nivel_de_riesgo_toma_el_mayor():
     alertas = [{"nivel": "Medio"}, {"nivel": "Alto"}]
     assert determinar_nivel_riesgo(alertas) == "Alto"
+
+
+# =========================================================
+# LÍMITES DE CAMPOS (formato SII y OWASP)
+# =========================================================
+
+@pytest.mark.parametrize("folio", ["1", "48211", "9999999999"])
+def test_folio_numerico_valido_en_boletas_y_facturas(folio):
+    assert validar_folio(folio, "Boleta") is None
+    assert validar_folio(folio, "Factura") is None
+
+
+@pytest.mark.parametrize("folio", ["2e21321rtdq2q", "ABC-12", "12.345"])
+def test_folio_con_letras_no_valido_en_boleta(folio):
+    assert validar_folio(folio, "Boleta") is not None
+
+
+def test_folio_de_mas_de_10_digitos_no_valido():
+    assert validar_folio("12345678901", "Factura") is not None
+
+
+def test_folio_cero_no_valido():
+    assert validar_folio("0000", "Boleta") is not None
+
+
+def test_comprobante_acepta_folio_alfanumerico():
+    assert validar_folio("DEMO-R6-001", "Comprobante") is None
+
+
+def test_comprobante_rechaza_folio_de_mas_de_20_caracteres():
+    assert validar_folio("X" * 21, "Otro") is not None
+
+
+def test_r5_bloquea_folio_invalido():
+    faltantes = validar_campos_obligatorios(datos_validos(folio="2e21321rtdq2q"))
+    assert any("Folio" in campo for campo in faltantes)
+
+
+def test_r5_bloquea_proveedor_de_mas_de_100_caracteres():
+    faltantes = validar_campos_obligatorios(datos_validos(proveedor="A" * 101))
+    assert any("Proveedor" in campo for campo in faltantes)
+
+
+def test_r5_bloquea_monto_sobre_el_maximo():
+    faltantes = validar_campos_obligatorios(
+        datos_validos(monto_neto=MONTO_MAXIMO, iva=1, monto_total=MONTO_MAXIMO + 1)
+    )
+    assert any("máximo" in campo for campo in faltantes)

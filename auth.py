@@ -40,6 +40,11 @@ def autenticar_usuario(correo: str, password: str) -> dict | None:
     Busca un usuario activo y verifica su contraseña.
     Retorna sus datos si la autenticación es correcta.
     """
+    # Validación de largo en el servidor (OWASP): correo hasta 254
+    # caracteres (RFC 5321) y contraseña hasta 64 (NIST SP 800-63B).
+    if not correo or not password or len(correo) > 254 or len(password) > 64:
+        return None
+
     cliente = obtener_cliente_supabase()
 
     respuesta = (

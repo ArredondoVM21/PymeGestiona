@@ -12,7 +12,7 @@ from database import (
     obtener_configuracion_empresa,
     subir_comprobante,
 )
-from reglas import evaluar_reglas_locales
+from reglas import LIMITES, MONTO_MAXIMO, evaluar_reglas_locales
 from ui import (
     ICONOS_ESTADO,
     badge_estado,
@@ -240,18 +240,22 @@ for rendicion in rendiciones_filtradas:
                 rut_emisor = st.text_input(
                     "RUT del emisor",
                     value=rendicion["rut_emisor"],
+                    max_chars=LIMITES["rut_emisor"],
                     key=f"rut_{rendicion['id']}",
                 )
 
                 proveedor = st.text_input(
                     "Proveedor",
-                    value=rendicion["proveedor"],
+                    value=rendicion["proveedor"][: LIMITES["proveedor"]],
+                    max_chars=LIMITES["proveedor"],
                     key=f"proveedor_{rendicion['id']}",
                 )
 
                 folio = st.text_input(
                     "Folio",
-                    value=rendicion["folio"],
+                    value=str(rendicion["folio"])[: LIMITES["folio"]],
+                    max_chars=LIMITES["folio"],
+                    help="Boletas y facturas: solo números, hasta 10 dígitos (formato SII).",
                     key=f"folio_{rendicion['id']}",
                 )
 
@@ -272,8 +276,8 @@ for rendicion in rendiciones_filtradas:
 
                 descripcion = st.text_area(
                     "Descripción",
-                    value=rendicion.get("descripcion") or "",
-                    max_chars=500,
+                    value=(rendicion.get("descripcion") or "")[: LIMITES["descripcion"]],
+                    max_chars=LIMITES["descripcion"],
                     key=f"descripcion_{rendicion['id']}",
                 )
 
@@ -283,6 +287,7 @@ for rendicion in rendiciones_filtradas:
                 monto_neto = st.number_input(
                     "Monto neto",
                     min_value=0,
+                    max_value=max(MONTO_MAXIMO, int(float(rendicion["monto_neto"]))),
                     value=int(float(rendicion["monto_neto"])),
                     step=100,
                     key=f"neto_{rendicion['id']}",
@@ -292,6 +297,7 @@ for rendicion in rendiciones_filtradas:
                 iva = st.number_input(
                     "IVA",
                     min_value=0,
+                    max_value=max(MONTO_MAXIMO, int(float(rendicion["iva"]))),
                     value=int(float(rendicion["iva"])),
                     step=100,
                     key=f"iva_{rendicion['id']}",
@@ -301,6 +307,7 @@ for rendicion in rendiciones_filtradas:
                 monto_total = st.number_input(
                     "Monto total",
                     min_value=0,
+                    max_value=max(MONTO_MAXIMO, int(float(rendicion["monto_total"]))),
                     value=int(float(rendicion["monto_total"])),
                     step=100,
                     key=f"total_{rendicion['id']}",

@@ -11,7 +11,13 @@ from database import (
     registrar_auditoria,
     subir_comprobante,
 )
-from reglas import evaluar_reglas_locales, validar_rut
+from reglas import (
+    LIMITES,
+    MONTO_MAXIMO,
+    evaluar_reglas_locales,
+    validar_folio,
+    validar_rut,
+)
 from ui import (
     checklist_reglas,
     encabezado,
@@ -243,7 +249,12 @@ elif paso == 1:
 
         tipo_documento = st.radio("Tipo de documento", TIPOS_DOCUMENTO, horizontal=True, key="nr_tipo")
 
-        rut_emisor = st.text_input("RUT del emisor", placeholder="76.123.456-0", key="nr_rut")
+        rut_emisor = st.text_input(
+            "RUT del emisor",
+            placeholder="76.123.456-0",
+            max_chars=LIMITES["rut_emisor"],
+            key="nr_rut",
+        )
 
         if rut_emisor.strip():
             if validar_rut(rut_emisor):
@@ -252,12 +263,28 @@ elif paso == 1:
             else:
                 st.caption(":red[⛔ El dígito verificador no corresponde a este RUT.]")
 
-        proveedor = st.text_input("Proveedor", placeholder="Nombre del proveedor", key="nr_proveedor")
+        proveedor = st.text_input(
+            "Proveedor",
+            placeholder="Nombre o razón social",
+            max_chars=LIMITES["proveedor"],
+            key="nr_proveedor",
+        )
 
         columna_1, columna_2 = st.columns(2)
 
         with columna_1:
-            folio = st.text_input("Folio", placeholder="N° del documento", key="nr_folio")
+            folio = st.text_input(
+                "Folio",
+                placeholder="N° del documento",
+                max_chars=LIMITES["folio"],
+                help="Boletas y facturas: solo números, hasta 10 dígitos (formato SII).",
+                key="nr_folio",
+            )
+
+            error_folio = validar_folio(folio, tipo_documento)
+
+            if error_folio:
+                st.caption(f":red[⛔ {error_folio}]")
 
         with columna_2:
             fecha_documento = st.date_input(
@@ -272,7 +299,9 @@ elif paso == 1:
 
         iva_automatico = st.toggle("Calcular IVA (19 %) y total desde el neto", key="nr_iva_auto")
 
-        monto_neto = st.number_input("Monto neto", min_value=0, step=1000, key="nr_neto")
+        monto_neto = st.number_input(
+            "Monto neto", min_value=0, max_value=MONTO_MAXIMO, step=1000, key="nr_neto"
+        )
 
         if iva_automatico:
             iva = round(monto_neto * TASA_IVA)
@@ -290,10 +319,10 @@ elif paso == 1:
             columna_iva, columna_total = st.columns(2)
 
             with columna_iva:
-                iva = st.number_input("IVA", min_value=0, step=100, key="nr_iva")
+                iva = st.number_input("IVA", min_value=0, max_value=MONTO_MAXIMO, step=100, key="nr_iva")
 
             with columna_total:
-                monto_total = st.number_input("Total", min_value=0, step=100, key="nr_total")
+                monto_total = st.number_input("Total", min_value=0, max_value=MONTO_MAXIMO, step=100, key="nr_total")
 
         if monto_total > limite_rendicion:
             st.caption(
@@ -313,8 +342,14 @@ elif paso == 1:
     if not folio.strip():
         pendientes.append("folio")
 
+    elif error_folio:
+        pendientes.append("folio válido")
+
     if monto_total <= 0:
         pendientes.append("total mayor a $0")
+
+    elif monto_total > MONTO_MAXIMO:
+        pendientes.append("total de hasta $999.999.999")
 
     elif abs((monto_neto + iva) - monto_total) >= 1:
         pendientes.append("neto + IVA igual al total")
@@ -372,7 +407,7 @@ elif paso == 2:
 
     descripcion = st.text_area(
         "Descripción (opcional)",
-        max_chars=500,
+        max_chars=LIMITES["descripcion"],
         placeholder="Ej.: materiales para la mantención en obra Vicuña.",
         key="nr_descripcion",
     )

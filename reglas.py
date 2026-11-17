@@ -3,6 +3,60 @@ from datetime import date
 
 
 # =========================================================
+# LÍMITES DE LOS CAMPOS
+# =========================================================
+# Referencias:
+# - SII, formato DTE: RUT "con guión y dígito, sin puntos" (10 caracteres),
+#   Folio numérico de hasta 10 dígitos, razón social hasta 100 caracteres.
+# - OWASP / NIST SP 800-63B: correo hasta 254 caracteres (RFC 5321) y
+#   contraseña de hasta 64 caracteres (bcrypt procesa como máximo 72 bytes).
+
+LIMITES = {
+    "rut_emisor": 12,          # con puntos y guion: 12.345.678-9
+    "proveedor": 100,          # razón social según formato DTE del SII
+    "folio": 20,               # campo de texto; Boleta/Factura: solo 10 dígitos
+    "folio_sii": 10,           # folio numérico de documentos SII
+    "descripcion": 500,
+    "motivo_rechazo": 500,
+    "correo": 254,
+    "password": 64,
+}
+
+MONTO_MAXIMO = 999_999_999     # $999.999.999 por rendición
+
+TIPOS_CON_FOLIO_SII = {"Boleta", "Factura"}
+
+
+def validar_folio(folio: str | None, tipo_documento: str | None) -> str | None:
+    """
+    Devuelve un mensaje de error si el folio no respeta el formato,
+    o None si es válido. Boletas y facturas usan el folio numérico
+    del SII (hasta 10 dígitos); comprobantes y otros aceptan letras.
+    """
+    limpio = re.sub(r"\s+", "", str(folio or ""))
+
+    if not limpio:
+        return None  # la ausencia la informa la validación de obligatorios
+
+    if tipo_documento in TIPOS_CON_FOLIO_SII:
+        if not limpio.isdigit():
+            return "Folio (boletas y facturas: solo números)"
+
+        if len(limpio) > LIMITES["folio_sii"]:
+            return "Folio (máximo 10 dígitos)"
+
+        if int(limpio) == 0:
+            return "Folio (debe ser mayor que cero)"
+
+        return None
+
+    if len(limpio) > LIMITES["folio"]:
+        return f"Folio (máximo {LIMITES['folio']} caracteres)"
+
+    return None
+
+
+# =========================================================
 # NORMALIZACIÓN Y VALIDACIÓN DE RUT Y FOLIO
 # =========================================================
 
@@ -121,10 +175,29 @@ def validar_campos_obligatorios(datos: dict) -> list[str]:
             "RUT del emisor (dígito verificador inválido)"
         )
 
+    error_folio = validar_folio(datos.get("folio"), datos.get("tipo_documento"))
+
+    if error_folio:
+        faltantes.append(error_folio)
+
+    for campo, nombre_visible in (
+        ("proveedor", "Proveedor"),
+        ("descripcion", "Descripción"),
+    ):
+        valor = datos.get(campo)
+
+        if isinstance(valor, str) and len(valor.strip()) > LIMITES[campo]:
+            faltantes.append(
+                f"{nombre_visible} (máximo {LIMITES[campo]} caracteres)"
+            )
+
     monto_total = datos.get("monto_total")
 
     if monto_total is None or float(monto_total) <= 0:
         faltantes.append("Monto total")
+
+    elif float(monto_total) > MONTO_MAXIMO:
+        faltantes.append("Monto total (máximo $999.999.999)")
 
     return faltantes
 

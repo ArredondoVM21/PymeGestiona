@@ -107,12 +107,14 @@ def mostrar_login() -> None:
                 correo = st.text_input(
                     "Correo electrónico",
                     placeholder="usuario@pymegestiona.cl",
+                    max_chars=254,
                 )
 
                 password = st.text_input(
                     "Contraseña",
                     type="password",
                     placeholder="Ingresa tu contraseña",
+                    max_chars=64,
                 )
 
                 ingresar = st.form_submit_button(
@@ -164,7 +166,7 @@ def mostrar_login() -> None:
                 """
             )
 
-        st.caption("PymeGestiona © 2026 · Datos demostrativos")
+        st.caption("Prototipo académico desplegado en la nube · INACAP")
 
 
 # =========================================================
